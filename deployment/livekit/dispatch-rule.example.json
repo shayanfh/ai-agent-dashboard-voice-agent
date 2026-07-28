@@ -1,0 +1,19 @@
+{
+  "dispatch_rule": {
+    "rule": {
+      "dispatchRuleIndividual": {
+        "roomPrefix": "call-"
+      }
+    },
+    "name": "Dashboard inbound calls",
+    "roomConfig": {
+      "agents": [
+        {
+          "agentName": "ai-agent-dashboard-inbound",
+          "metadata": "{\"source\":\"asterisk\"}"
+        }
+      ]
+    }
+  }
+}
+

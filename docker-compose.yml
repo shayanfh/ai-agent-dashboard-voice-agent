@@ -1,0 +1,6 @@
+services:
+  voice-agent:
+    build: .
+    env_file:
+      - .env
+    restart: unless-stopped
