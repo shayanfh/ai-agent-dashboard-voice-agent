@@ -4,6 +4,4 @@ WORKDIR /app
 COPY pyproject.toml README.md ./
 COPY app ./app
 RUN pip install .
-USER voice
 CMD ["python", "-m", "app.main", "start"]
-
