@@ -3,4 +3,6 @@ services:
     build: .
     env_file:
       - .env
+    volumes:
+      - ./scripts:/app/scripts:ro
     restart: unless-stopped
