@@ -43,6 +43,15 @@ async def run_inbound_call(ctx: agents.JobContext, settings: Settings) -> None:
     sip = extract_sip_call_info(
         participant, room_name=ctx.room.name, job_metadata=ctx.job.metadata
     )
+    logger.info(
+        "sip_routing_resolved",
+        room_name=sip.room_name,
+        caller_number=sip.caller_number,
+        called_number=sip.called_number,
+        destination_extension=sip.destination_extension,
+        sip_trunk_id=sip.sip_trunk_id,
+        participant_identity=sip.participant_identity,
+    )
     if not sip.routing_number:
         raise CallerNotFoundError("Called number/extension is missing from SIP attributes")
 
