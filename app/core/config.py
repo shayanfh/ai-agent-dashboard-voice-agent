@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     call_max_duration_seconds: int = Field(default=1800, ge=30)
     caller_wait_timeout_seconds: int = Field(default=30, ge=5)
     enable_call_recording: bool = False
+    asterisk_linked_id_wait_seconds: float = Field(default=2.0, ge=0, le=10)
     enable_usage_reporting: bool = True
     enable_debug_logging: bool = False
 

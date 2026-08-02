@@ -31,6 +31,7 @@ class CallCreate(BaseModel):
     extension: str | None = None
     caller_number: str | None = None
     livekit_room_name: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class CallCreated(BaseModel):

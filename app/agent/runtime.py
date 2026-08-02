@@ -1,4 +1,6 @@
 import asyncio
+import json
+from dataclasses import replace
 from uuid import uuid4
 
 import structlog
@@ -14,7 +16,7 @@ from app.core.exceptions import CallerNotFoundError
 from app.providers.factories import create_llm, create_stt, create_tts, create_vad
 from app.services.call_service import CallLifecycleService
 from app.services.transcript_service import TranscriptService
-from app.telephony.attributes import extract_sip_call_info
+from app.telephony.attributes import extract_sip_call_info, parse_remote_sip_headers
 
 logger = structlog.get_logger()
 
@@ -43,12 +45,50 @@ async def run_inbound_call(ctx: agents.JobContext, settings: Settings) -> None:
     sip = extract_sip_call_info(
         participant, room_name=ctx.room.name, job_metadata=ctx.job.metadata
     )
+    if settings.enable_call_recording and not sip.asterisk_linked_id:
+        try:
+            response = await asyncio.wait_for(
+                ctx.room.local_participant.perform_rpc(
+                    destination_identity=participant.identity,
+                    method="lk.sip.GetRemoteHeaders",
+                    payload=json.dumps(
+                        {
+                            "include": [
+                                "X-Asterisk-LinkedID",
+                                "X-Destination-Extension",
+                            ]
+                        }
+                    ),
+                ),
+                timeout=settings.asterisk_linked_id_wait_seconds,
+            )
+            headers = parse_remote_sip_headers(response)
+            sip = replace(
+                sip,
+                asterisk_linked_id=headers.get("x-asterisk-linkedid"),
+                destination_extension=sip.destination_extension
+                or headers.get("x-destination-extension"),
+            )
+        except (TimeoutError, ValueError, rtc.RpcError) as exc:
+            logger.warning("sip_header_rpc_failed", error=str(exc))
+
+        if not sip.asterisk_linked_id:
+            sip = extract_sip_call_info(
+                participant, room_name=ctx.room.name, job_metadata=ctx.job.metadata
+            )
+        if not sip.asterisk_linked_id:
+            logger.warning(
+                "asterisk_linked_id_missing",
+                room_name=sip.room_name,
+                wait_seconds=settings.asterisk_linked_id_wait_seconds,
+            )
     logger.info(
         "sip_routing_resolved",
         room_name=sip.room_name,
         caller_number=sip.caller_number,
         called_number=sip.called_number,
         destination_extension=sip.destination_extension,
+        asterisk_linked_id=sip.asterisk_linked_id,
         sip_trunk_id=sip.sip_trunk_id,
         participant_identity=sip.participant_identity,
     )
@@ -67,6 +107,14 @@ async def run_inbound_call(ctx: agents.JobContext, settings: Settings) -> None:
                 extension=sip.destination_extension,
                 caller_number=sip.caller_number,
                 livekit_room_name=sip.room_name,
+                metadata={
+                    "asterisk_linked_id": sip.asterisk_linked_id,
+                    "sip_call_id": sip.sip_call_id,
+                    "sip_call_id_full": sip.sip_call_id_full,
+                    "sip_trunk_id": sip.sip_trunk_id,
+                    "sip_rule_id": sip.sip_rule_id,
+                    "participant_identity": sip.participant_identity,
+                },
             ),
             correlation_id=correlation_id,
             idempotency_key=f"call:{sip.sip_call_id or sip.room_name}",

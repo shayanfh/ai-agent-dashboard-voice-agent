@@ -7,7 +7,20 @@ def make_context(call_id: str) -> CallContext:
     config = ResolvedAgent(
         company_id=f"company-{call_id}", agent_id="agent", agent_name="Agent"
     )
-    sip = SipCallInfo(None, "1000", None, None, None, "sip", "", None, "room", {})
+    sip = SipCallInfo(
+        caller_number=None,
+        called_number="1000",
+        sip_trunk_id=None,
+        sip_call_id=None,
+        sip_call_id_full=None,
+        sip_rule_id=None,
+        participant_identity="sip",
+        participant_name="",
+        destination_extension=None,
+        asterisk_linked_id=None,
+        room_name="room",
+        dispatch_metadata={},
+    )
     return CallContext(call_id, "correlation", config.company_id, "agent", sip, config)
 
 
@@ -27,4 +40,3 @@ def test_sequence_is_per_call() -> None:
     assert first.next_sequence() == 1
     assert first.next_sequence() == 2
     assert second.next_sequence() == 1
-

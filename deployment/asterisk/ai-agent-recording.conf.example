@@ -1,0 +1,4 @@
+# Do not include /api/v1 or a trailing slash.
+DASHBOARD_BACKEND_URL=https://dashboard-api.example.com
+DASHBOARD_INTERNAL_API_KEY=replace-with-the-backend-internal-api-key
+DELETE_AFTER_UPLOAD=false

@@ -11,7 +11,8 @@ Caller → gateway/provider → Asterisk/FreePBX → LiveKit SIP → isolated Li
 → Dashboard Backend internal API.
 
 The worker extracts `sip.phoneNumber`, `sip.trunkPhoneNumber`, call/trunk IDs and extension from
-the SIP participant. It resolves the agent, creates the call, builds tenant-scoped STT/LLM/TTS
+the SIP participant. When Asterisk recording is enabled it also extracts the forwarded
+`X-Asterisk-LinkedID`. It resolves the agent, creates the call, builds tenant-scoped STT/LLM/TTS
 objects, greets immediately, persists committed conversation items, and completes the call.
 
 ## Setup
@@ -44,6 +45,9 @@ the internal API key.
 - `POST /api/v1/internal/voice/calls/{call_id}/messages`
 - `POST /api/v1/internal/voice/calls/{call_id}/complete`
 
+Asterisk uploads completed WAV files directly to
+`POST /api/v1/internal/voice/recordings/asterisk`; the Voice Agent never proxies recording audio.
+
 The current Dashboard Backend does not yet expose secure internal endpoints for knowledge search,
 request creation, business information, usage reporting, or status updates. The runtime therefore
 does not expose tools that could falsely claim those operations succeeded. Add those endpoints to
@@ -54,6 +58,23 @@ the backend contract before enabling those tools.
 See `deployment/livekit` for inbound trunk and individual dispatch examples, and
 `deployment/asterisk` for PJSIP/dialplan examples. Infrastructure is never provisioned during
 worker startup. The dispatch rule and worker must use the exact same agent name.
+
+## Asterisk recording
+
+Recording is performed by Asterisk `MixMonitor`, not by the Voice Agent container. This keeps the
+recording at the telephony edge and avoids running LiveKit Egress. The correlation path is:
+
+`Asterisk linkedid -> X-Asterisk-LinkedID -> LiveKit participant attribute -> Call metadata -> WAV upload`
+
+To enable correlation, set `ENABLE_CALL_RECORDING=true` on the Voice Agent and install the
+uploader and dialplan snippets from `deployment/asterisk`. The `headersToAttributes` mapping in
+`deployment/livekit/inbound-trunk.example.json` is a recommended fallback, not a requirement for
+the direct RPC path. A missing linked ID is logged as `asterisk_linked_id_missing`; the call still
+proceeds, but its recording cannot be attached automatically.
+
+The worker first reads the linked ID directly with LiveKit's `lk.sip.GetRemoteHeaders` RPC and
+uses the mapped participant attribute as a fallback. This avoids depending on the timing of
+asynchronous SIP attribute updates.
 
 ## Verification
 
@@ -76,7 +97,9 @@ End-to-end checklist:
 9. The greeting plays once.
 10. Caller/assistant messages appear in the Dashboard.
 11. Disconnecting stores duration, summary and outcome.
+12. Asterisk creates the WAV, uploads it, and the Dashboard Call receives a recording URL.
 
-Recording is intentionally disabled by default; no-op recording is not presented as operational.
+Recording correlation is disabled by default. Set `ENABLE_CALL_RECORDING=true` only after the
+LiveKit header mapping and Asterisk uploader are installed.
 For failures, inspect JSON logs by correlation ID, then verify SIP participant attributes and the
 called number format matches the backend mapping exactly.
