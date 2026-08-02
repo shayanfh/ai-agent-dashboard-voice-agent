@@ -32,7 +32,7 @@ class Settings(BaseSettings):
     summary_llm_model: str = "gpt-5.6-luna"
     summary_llm_timeout_seconds: float = Field(default=20, gt=0, le=120)
     summary_max_transcript_chars: int = Field(default=30_000, ge=1_000, le=200_000)
-    summary_max_output_tokens: int = Field(default=160, ge=32, le=1_000)
+    summary_max_output_tokens: int = Field(default=400, ge=128, le=2_000)
     http_timeout_seconds: float = Field(default=10, gt=0)
     http_max_retries: int = Field(default=3, ge=0, le=10)
     call_max_duration_seconds: int = Field(default=1800, ge=30)

@@ -104,19 +104,22 @@ LiveKit header mapping and Asterisk uploader are installed.
 For failures, inspect JSON logs by correlation ID, then verify SIP participant attributes and the
 called number format matches the backend mapping exactly.
 
-### Post-call AI summary
+### Post-call AI analysis
 
-When a call ends, the worker sends the complete caller/assistant transcript to a fixed OpenAI
-model and stores a one-sentence summary in the Dashboard Call. This summarizer is independent of
-the LLM configured for each tenant agent. It is intended to capture both the caller's purpose and
-the final outcome, for example: `The caller wanted to order a pizza but changed their mind.`
+When a call ends, the worker sends the committed transcript to a fixed OpenAI model once and
+stores a structured result containing a one-sentence summary, the final outcome, and explicitly
+stated customer/request data. The analyzer is independent of the LLM configured for each tenant
+agent. Valid outcomes are `booking_created`, `information_request`, `callback_requested`,
+`no_action`, and `failed`. Confirmed bookings and callback requests also create the corresponding
+Dashboard Request through the existing Backend completion flow.
 
 ```dotenv
 SUMMARY_LLM_MODEL=gpt-5.6-luna
 SUMMARY_LLM_TIMEOUT_SECONDS=20
 SUMMARY_MAX_TRANSCRIPT_CHARS=30000
-SUMMARY_MAX_OUTPUT_TOKENS=160
+SUMMARY_MAX_OUTPUT_TOKENS=400
 ```
 
-If the summary request times out or fails, call completion still succeeds and falls back to the
-previous caller-only transcript summary. Transcript content is sent with `store=false`.
+The response uses strict JSON Schema and transcript content is sent with `store=false`. If analysis
+times out, returns invalid data, or fails, call completion still succeeds with a caller-only
+fallback summary and `outcome=no_action`.

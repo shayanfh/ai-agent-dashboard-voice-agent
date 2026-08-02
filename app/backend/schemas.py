@@ -1,6 +1,6 @@
 from datetime import datetime
 from enum import StrEnum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -58,7 +58,13 @@ class CallMessage(BaseModel):
 
 class CallComplete(BaseModel):
     summary: str | None = None
-    outcome: str = "no_action"
+    outcome: Literal[
+        "booking_created",
+        "information_request",
+        "callback_requested",
+        "no_action",
+        "failed",
+    ] = "no_action"
     was_transferred: bool = False
     transfer_number: str | None = None
     extracted_data: dict[str, Any] | None = None
