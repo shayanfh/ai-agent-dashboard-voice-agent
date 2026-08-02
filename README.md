@@ -123,3 +123,11 @@ SUMMARY_MAX_OUTPUT_TOKENS=400
 The response uses strict JSON Schema and transcript content is sent with `store=false`. If analysis
 times out, returns invalid data, or fails, call completion still succeeds with a caller-only
 fallback summary and `outcome=no_action`.
+
+### Agent hangup
+
+The agent has LiveKit's `EndCallTool`. When the caller clearly says goodbye or indicates that the
+conversation is finished, the tool plays a brief goodbye, closes the session, and deletes the
+room so the SIP caller is disconnected. It is hidden during the initial greeting and must not be
+used for silence, unclear speech, hold, transfer, or temporary hesitation. Agent-initiated calls
+are completed with `completion_reason=agent_hangup` before post-call analysis is persisted.

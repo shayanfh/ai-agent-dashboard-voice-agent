@@ -5,7 +5,8 @@ from uuid import uuid4
 
 import structlog
 from livekit import agents, rtc
-from livekit.agents import Agent, AgentSession, room_io
+from livekit.agents import Agent, AgentSession, llm, room_io
+from livekit.agents.beta import EndCallTool
 
 from app.agent.context import CallContext
 from app.agent.instructions import compose_instructions
@@ -136,6 +137,22 @@ async def run_inbound_call(ctx: agents.JobContext, settings: Settings) -> None:
             participant_identity=sip.participant_identity,
             correlation_id=correlation_id,
         )
+        hangup_requested = False
+
+        async def on_end_call_tool_called(_: llm.Toolset.ToolCalledEvent) -> None:
+            nonlocal hangup_requested
+            hangup_requested = True
+            log.info("agent_hangup_requested")
+
+        end_call_tool = EndCallTool(
+            delete_room=True,
+            ignore_on_enter=True,
+            end_instructions=(
+                "Briefly say goodbye in the current conversation language. "
+                "Do not ask another question or continue the conversation."
+            ),
+            on_tool_called=on_end_call_tool_called,
+        )
         session: AgentSession[None] = AgentSession(
             vad=create_vad(),
             stt=create_stt(config, settings),
@@ -164,7 +181,10 @@ async def run_inbound_call(ctx: agents.JobContext, settings: Settings) -> None:
 
         await session.start(
             room=ctx.room,
-            agent=Agent(instructions=compose_instructions(config)),
+            agent=Agent(
+                instructions=compose_instructions(config),
+                tools=[end_call_tool],
+            ),
             room_options=room_io.RoomOptions(participant_identity=sip.participant_identity),
         )
         greeting = config.greeting_message or f"Hello, you are speaking with {config.agent_name}."
@@ -179,6 +199,8 @@ async def run_inbound_call(ctx: agents.JobContext, settings: Settings) -> None:
             reason = "maximum_duration_reached"
             await session.aclose()
         finally:
+            if hangup_requested:
+                reason = "agent_hangup"
             await transcripts.flush()
             await lifecycle.complete(reason=reason)
             log.info("call_session_completed", reason=reason)

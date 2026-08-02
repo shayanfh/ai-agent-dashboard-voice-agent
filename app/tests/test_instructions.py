@@ -19,3 +19,6 @@ def test_default_instructions_require_clarification_instead_of_guessing() -> Non
     assert "in the conversation's current" in instructions
     assert "language, to repeat" in instructions
     assert "Default language: fa" in instructions
+    assert "clearly says goodbye" in instructions
+    assert "use the end_call tool" in instructions
+    assert "Do not use it for silence" in instructions
