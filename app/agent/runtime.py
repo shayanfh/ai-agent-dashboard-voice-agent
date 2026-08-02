@@ -15,6 +15,7 @@ from app.core.config import Settings
 from app.core.exceptions import CallerNotFoundError
 from app.providers.factories import create_llm, create_stt, create_tts, create_vad
 from app.services.call_service import CallLifecycleService
+from app.services.summary_service import OpenAICallSummarizer
 from app.services.transcript_service import TranscriptService
 from app.telephony.attributes import extract_sip_call_info, parse_remote_sip_headers
 
@@ -142,7 +143,11 @@ async def run_inbound_call(ctx: agents.JobContext, settings: Settings) -> None:
             tts=create_tts(config, settings),
         )
         transcripts = TranscriptService(backend, call_context)
-        lifecycle = CallLifecycleService(backend, call_context)
+        lifecycle = CallLifecycleService(
+            backend,
+            call_context,
+            OpenAICallSummarizer(settings),
+        )
         closed = asyncio.Event()
 
         @session.on("conversation_item_added")

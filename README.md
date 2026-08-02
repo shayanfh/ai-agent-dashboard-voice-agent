@@ -103,3 +103,20 @@ Recording correlation is disabled by default. Set `ENABLE_CALL_RECORDING=true` o
 LiveKit header mapping and Asterisk uploader are installed.
 For failures, inspect JSON logs by correlation ID, then verify SIP participant attributes and the
 called number format matches the backend mapping exactly.
+
+### Post-call AI summary
+
+When a call ends, the worker sends the complete caller/assistant transcript to a fixed OpenAI
+model and stores a one-sentence summary in the Dashboard Call. This summarizer is independent of
+the LLM configured for each tenant agent. It is intended to capture both the caller's purpose and
+the final outcome, for example: `The caller wanted to order a pizza but changed their mind.`
+
+```dotenv
+SUMMARY_LLM_MODEL=gpt-5.6-luna
+SUMMARY_LLM_TIMEOUT_SECONDS=20
+SUMMARY_MAX_TRANSCRIPT_CHARS=30000
+SUMMARY_MAX_OUTPUT_TOKENS=160
+```
+
+If the summary request times out or fails, call completion still succeeds and falls back to the
+previous caller-only transcript summary. Transcript content is sent with `store=false`.
