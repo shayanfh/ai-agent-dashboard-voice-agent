@@ -16,6 +16,7 @@ from app.core.config import Settings
 from app.core.exceptions import CallerNotFoundError
 from app.providers.factories import create_llm, create_stt, create_tts, create_vad
 from app.services.call_service import CallLifecycleService
+from app.services.recording_service import LiveKitRecordingService, RecordingSession
 from app.services.summary_service import OpenAICallAnalyzer
 from app.services.transcript_service import TranscriptService
 from app.telephony.attributes import extract_sip_call_info, parse_remote_sip_headers
@@ -47,7 +48,11 @@ async def run_inbound_call(ctx: agents.JobContext, settings: Settings) -> None:
     sip = extract_sip_call_info(
         participant, room_name=ctx.room.name, job_metadata=ctx.job.metadata
     )
-    if settings.enable_call_recording and not sip.asterisk_linked_id:
+    use_asterisk_recording = (
+        settings.recording_provider == "asterisk"
+        or (settings.enable_call_recording and settings.recording_provider == "disabled")
+    )
+    if use_asterisk_recording and not sip.asterisk_linked_id:
         try:
             response = await asyncio.wait_for(
                 ctx.room.local_participant.perform_rpc(
@@ -165,6 +170,22 @@ async def run_inbound_call(ctx: agents.JobContext, settings: Settings) -> None:
             call_context,
             OpenAICallAnalyzer(settings),
         )
+        recording: LiveKitRecordingService | None = None
+        recording_session: RecordingSession | None = None
+        if settings.recording_provider == "livekit_egress":
+            recording = LiveKitRecordingService(settings, backend)
+            try:
+                recording_session = await recording.start(
+                    room_name=sip.room_name,
+                    company_id=config.company_id,
+                    call_id=created.call_id,
+                )
+                log.info(
+                    "livekit_recording_started",
+                    egress_id=recording_session.egress_id,
+                )
+            except Exception:
+                log.exception("livekit_recording_start_failed")
         closed = asyncio.Event()
 
         @session.on("conversation_item_added")
@@ -203,4 +224,20 @@ async def run_inbound_call(ctx: agents.JobContext, settings: Settings) -> None:
                 reason = "agent_hangup"
             await transcripts.flush()
             await lifecycle.complete(reason=reason)
+            if recording and recording_session:
+                try:
+                    await recording.stop_and_report(
+                        recording_session,
+                        call_id=created.call_id,
+                        correlation_id=correlation_id,
+                    )
+                    log.info(
+                        "livekit_recording_completed",
+                        egress_id=recording_session.egress_id,
+                    )
+                except Exception:
+                    log.exception(
+                        "livekit_recording_completion_failed",
+                        egress_id=recording_session.egress_id,
+                    )
             log.info("call_session_completed", reason=reason)

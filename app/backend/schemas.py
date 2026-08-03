@@ -73,3 +73,11 @@ class CallComplete(BaseModel):
     ended_at: datetime | None = None
     duration_seconds: int | None = Field(default=None, ge=0)
 
+
+class CallRecordingUpdate(BaseModel):
+    egress_id: str
+    recording_url: str
+    object_key: str
+    source: Literal["livekit_egress"] = "livekit_egress"
+    recording_duration_seconds: int | None = Field(default=None, ge=0)
+

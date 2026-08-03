@@ -6,7 +6,14 @@ import httpx
 from tenacity import AsyncRetrying, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from app.backend.exceptions import AgentNotFound, BackendRejected, BackendUnavailable
-from app.backend.schemas import CallComplete, CallCreate, CallCreated, CallMessage, ResolvedAgent
+from app.backend.schemas import (
+    CallComplete,
+    CallCreate,
+    CallCreated,
+    CallMessage,
+    CallRecordingUpdate,
+    ResolvedAgent,
+)
 from app.core.config import Settings
 
 
@@ -127,5 +134,17 @@ class DashboardBackendClient:
             "POST", f"/api/v1/internal/voice/calls/{call_id}/complete",
             json=data.model_dump(mode="json", exclude_none=True), correlation_id=correlation_id,
             idempotency_key=f"complete:{call_id}",
+        )
+        self._ensure_success(response)
+
+    async def update_call_recording(
+        self, call_id: str, data: CallRecordingUpdate, *, correlation_id: str
+    ) -> None:
+        response = await self._request(
+            "PATCH",
+            f"/api/v1/internal/voice/calls/{call_id}/recording",
+            json=data.model_dump(mode="json", exclude_none=True),
+            correlation_id=correlation_id,
+            idempotency_key=f"recording:{data.egress_id}",
         )
         self._ensure_success(response)
