@@ -1,0 +1,30 @@
+; Define these once in pjsip.conf (adjust bind addresses and certificate paths).
+; PJSIP transport sections are not safely reloadable, so the provisioner only
+; references them and never rewrites them.
+
+[transport-udp]
+type=transport
+protocol=udp
+bind=0.0.0.0:5060
+external_signaling_address=ASTERISK_PUBLIC_IP
+external_media_address=ASTERISK_PUBLIC_IP
+local_net=10.0.0.0/8
+
+[transport-tcp]
+type=transport
+protocol=tcp
+bind=0.0.0.0:5060
+external_signaling_address=ASTERISK_PUBLIC_IP
+external_media_address=ASTERISK_PUBLIC_IP
+local_net=10.0.0.0/8
+
+[transport-tls]
+type=transport
+protocol=tls
+bind=0.0.0.0:5061
+cert_file=/etc/asterisk/keys/fullchain.pem
+priv_key_file=/etc/asterisk/keys/privkey.pem
+method=tlsv1_2
+external_signaling_address=ASTERISK_PUBLIC_IP
+external_media_address=ASTERISK_PUBLIC_IP
+local_net=10.0.0.0/8

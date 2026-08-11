@@ -38,12 +38,6 @@ class Settings(BaseSettings):
     call_max_duration_seconds: int = Field(default=1800, ge=30)
     caller_wait_timeout_seconds: int = Field(default=30, ge=5)
     enable_call_recording: bool = False
-    recording_provider: Literal["disabled", "asterisk", "livekit_egress"] = "disabled"
-    recording_s3_endpoint: str | None = None
-    recording_s3_access_key: SecretStr | None = None
-    recording_s3_secret_key: SecretStr | None = None
-    recording_s3_bucket: str = "ai-agent-dashboard"
-    recording_s3_region: str = "us-east-1"
     asterisk_linked_id_wait_seconds: float = Field(default=2.0, ge=0, le=10)
     enable_usage_reporting: bool = True
     enable_debug_logging: bool = False
@@ -59,19 +53,6 @@ class Settings(BaseSettings):
             raise ValueError("OPENAI_API_KEY is required for the configured provider pipeline")
         if "deepgram" in providers and not self.deepgram_api_key:
             raise ValueError("DEEPGRAM_API_KEY is required when Deepgram STT is configured")
-        if self.recording_provider == "livekit_egress" and not all(
-            (
-                self.recording_s3_endpoint,
-                self.recording_s3_access_key,
-                self.recording_s3_secret_key,
-                self.recording_s3_bucket,
-            )
-        ):
-            raise ValueError(
-                "RECORDING_S3_ENDPOINT, RECORDING_S3_ACCESS_KEY, "
-                "RECORDING_S3_SECRET_KEY and RECORDING_S3_BUCKET are required "
-                "for LiveKit Egress recording"
-            )
         return self
 
 

@@ -1,0 +1,5 @@
+; Add to the end of /etc/asterisk/pjsip.conf:
+#include ai-agent-generated/pjsip.conf
+
+; Add to the end of /etc/asterisk/extensions.conf (or extensions_custom.conf):
+#include ai-agent-generated/extensions.conf

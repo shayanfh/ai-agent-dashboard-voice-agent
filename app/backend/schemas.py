@@ -68,16 +68,6 @@ class CallComplete(BaseModel):
     was_transferred: bool = False
     transfer_number: str | None = None
     extracted_data: dict[str, Any] | None = None
-    recording_url: str | None = None
-    recording_duration_seconds: int | None = None
     ended_at: datetime | None = None
     duration_seconds: int | None = Field(default=None, ge=0)
-
-
-class CallRecordingUpdate(BaseModel):
-    egress_id: str
-    recording_url: str
-    object_key: str
-    source: Literal["livekit_egress"] = "livekit_egress"
-    recording_duration_seconds: int | None = Field(default=None, ge=0)
 

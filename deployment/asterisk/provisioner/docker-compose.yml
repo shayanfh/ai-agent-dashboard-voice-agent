@@ -1,0 +1,20 @@
+services:
+  asterisk-provisioner:
+    build: .
+    env_file:
+      - .env
+    network_mode: host
+    group_add:
+      - "${ASTERISK_GID:-1001}"
+    volumes:
+      - /etc/asterisk/ai-agent-generated:/etc/asterisk/ai-agent-generated
+      - provisioner_state:/var/lib/asterisk-provisioner
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  provisioner_state:

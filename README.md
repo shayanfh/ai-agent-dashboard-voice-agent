@@ -1,14 +1,14 @@
 # AI Agent Dashboard Voice Agent
 
-Production-style runtime connecting direct SIP/Twilio and legacy Asterisk calls through LiveKit
-SIP to the existing
+Production-style runtime connecting customer SIP/Twilio calls through the central Asterisk
+gateway and LiveKit SIP to the existing
 Dashboard Backend. One explicitly named, concurrent worker (`ai-agent-dashboard-inbound`) loads
 each tenant's agent configuration by called number or extension; no customer configuration is
 stored globally and the service never accesses PostgreSQL directly.
 
 ## Call flow
 
-Caller → Twilio/SIP provider (or legacy Asterisk/FreePBX) → LiveKit SIP → isolated LiveKit room → this worker
+Caller → Twilio/SIP provider → central Asterisk → LiveKit SIP → isolated LiveKit room → this worker
 → Dashboard Backend internal API.
 
 The worker extracts `sip.phoneNumber`, `sip.trunkPhoneNumber`, call/trunk IDs and extension from
@@ -57,9 +57,9 @@ the backend contract before enabling those tools.
 
 ## SIP provisioning
 
-See `deployment/livekit` for inbound trunk and individual dispatch examples, and
-`deployment/asterisk` for PJSIP/dialplan examples. Infrastructure is never provisioned during
-worker startup. The dispatch rule and worker must use the exact same agent name.
+See `deployment/livekit` for the one central inbound trunk and dispatch rule, and
+`deployment/asterisk` for the Asterisk provisioner. Customer trunks are provisioned through the
+Backend, never during worker startup. The dispatch rule and worker must use the same agent name.
 
 ## Asterisk recording
 
@@ -77,27 +77,6 @@ proceeds, but its recording cannot be attached automatically.
 The worker first reads the linked ID directly with LiveKit's `lk.sip.GetRemoteHeaders` RPC and
 uses the mapped participant attribute as a fallback. This avoids depending on the timing of
 asynchronous SIP attribute updates.
-
-## Direct LiveKit recording
-
-For Twilio and generic SIP connections that bypass Asterisk, set
-`RECORDING_PROVIDER=livekit_egress`. The worker starts an audio-only LiveKit Room Composite
-Egress after the backend creates the call, uploads an OGG object to S3/MinIO, and reports the
-object key to the backend. A recording failure is logged and does not terminate the call.
-
-```dotenv
-RECORDING_PROVIDER=livekit_egress
-RECORDING_S3_ENDPOINT=https://dashboard-api.example.com
-RECORDING_S3_ACCESS_KEY=<dedicated-access-key>
-RECORDING_S3_SECRET_KEY=<dedicated-secret-key>
-RECORDING_S3_BUCKET=ai-agent-dashboard
-RECORDING_S3_REGION=us-east-1
-```
-
-The endpoint must be publicly reachable from LiveKit Egress and must preserve the original Host
-header for S3 Signature V4. Use credentials restricted to the recording bucket/prefix. For the
-legacy Asterisk flow use `RECORDING_PROVIDER=asterisk`; `ENABLE_CALL_RECORDING=true` remains a
-backward-compatible alias for Asterisk header correlation.
 
 ## Verification
 
@@ -120,7 +99,7 @@ End-to-end checklist:
 9. The greeting plays once.
 10. Caller/assistant messages appear in the Dashboard.
 11. Disconnecting stores duration, summary and outcome.
-12. LiveKit Egress uploads OGG (or Asterisk uploads WAV), and the Call receives a recording URL.
+12. Asterisk uploads WAV and the Call receives a recording URL.
 
 Recording correlation is disabled by default. Set `ENABLE_CALL_RECORDING=true` only after the
 LiveKit header mapping and Asterisk uploader are installed.

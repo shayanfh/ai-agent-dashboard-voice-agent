@@ -1,18 +1,21 @@
 # LiveKit SIP setup
 
-Replace placeholders, then create the long-lived infrastructure explicitly:
+Create this infrastructure once for the central Asterisk gateway. Customer provisioning must not
+create a LiveKit trunk per phone number. Replace the Asterisk address, then run:
 
 ```bash
 lk sip inbound create deployment/livekit/inbound-trunk.example.json
 lk sip dispatch create deployment/livekit/dispatch-rule.example.json --trunks SIP_TRUNK_ID
 ```
 
-The example accepts destination `1000`, matching the tested Backend mapping. If the trunk already
-exists, do not create a duplicate. The worker reads `X-Asterisk-LinkedID` directly with the SIP
-header RPC, so the existing trunk can remain unchanged. The mapping in the JSON is a fallback for
-asynchronous participant attributes. If you choose to add it to an existing trunk, replace the
-trunk through the LiveKit SIP API while preserving its ID, numbers, authentication, and allowed
-addresses; the CLI field-update operation cannot update every trunk property.
+The empty `numbers` list lets this one trunk receive every DID that Asterisk forwards; access is
+restricted by `allowedAddresses`. If the trunk already exists, update it instead of creating a
+duplicate. Header mappings preserve Asterisk correlation, optional destination extension, and the
+Backend connection ID. The worker also reads the headers through the SIP header RPC.
+
+LiveKit Cloud requires `allowedAddresses` to be enabled for the project. If it is unavailable,
+configure `authUsername` and `authPassword` on both this trunk and the Asterisk LiveKit endpoint
+instead; never leave an all-number trunk without address or digest authentication.
 
 The dispatch `agentName` must remain `ai-agent-dashboard-inbound`, matching
 `LIVEKIT_AGENT_NAME`. Each call gets an isolated room with the `call-` prefix.

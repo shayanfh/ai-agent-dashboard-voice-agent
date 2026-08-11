@@ -1,10 +1,12 @@
 {
   "trunk": {
     "name": "Asterisk inbound",
-    "numbers": ["1000"],
+    "numbers": [],
     "allowedAddresses": ["ASTERISK_PUBLIC_IP/32"],
     "headersToAttributes": {
-      "X-Asterisk-LinkedID": "asterisk.linkedID"
+      "X-Asterisk-LinkedID": "asterisk.linkedID",
+      "X-Destination-Extension": "sip.extension",
+      "X-Phone-Connection-ID": "asterisk.connectionID"
     }
   }
 }
