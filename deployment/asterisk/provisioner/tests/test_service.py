@@ -18,6 +18,11 @@ class FakeAmi:
         return "Registration/Server  Auth  Status\nprovider.test  Registered"
 
 
+class FailingAmi(FakeAmi):
+    async def reload(self) -> None:
+        raise RuntimeError("original AMI reload failure")
+
+
 @pytest.mark.asyncio
 async def test_upsert_status_and_delete_are_atomic(tmp_path) -> None:
     settings = Settings(
@@ -56,3 +61,45 @@ async def test_upsert_status_and_delete_are_atomic(tmp_path) -> None:
     assert await service.delete(connection_id) is True
     assert json.loads((tmp_path / "state.json").read_text()) == {}
     assert service.ami.reload_count == 2
+
+
+@pytest.mark.asyncio
+async def test_rollback_does_not_mask_original_error(tmp_path, monkeypatch) -> None:
+    settings = Settings(
+        _env_file=None,
+        provisioner_api_key="test-key",
+        public_sip_uri="sip:asterisk.test:5060;transport=udp",
+        livekit_sip_uri="sip:livekit.test:5060;transport=udp",
+        ami_username="provisioner",
+        ami_password="secret",
+        state_file=str(tmp_path / "state.json"),
+        generated_pjsip_file=str(tmp_path / "pjsip.conf"),
+        generated_dialplan_file=str(tmp_path / "extensions.conf"),
+        enable_recording=False,
+    )
+    service = ProvisioningService(settings)
+    service.ami = FailingAmi()
+    connection_id = str(uuid.uuid4())
+    connection = ConnectionSpec(
+        company_id=uuid.uuid4(),
+        name="Customer IP trunk",
+        provider="generic_sip",
+        mode="ip_trunk",
+        phone_number="+19714361744",
+        allowed_addresses=["203.0.113.10/32"],
+        public_sip_uri=settings.public_sip_uri,
+    )
+    original_render = service._render
+    render_count = 0
+
+    def fail_only_during_rollback(connections):
+        nonlocal render_count
+        render_count += 1
+        if render_count == 2:
+            raise PermissionError("rollback write failure")
+        original_render(connections)
+
+    monkeypatch.setattr(service, "_render", fail_only_during_rollback)
+
+    with pytest.raises(RuntimeError, match="original AMI reload failure"):
+        await service.upsert(connection_id, connection)

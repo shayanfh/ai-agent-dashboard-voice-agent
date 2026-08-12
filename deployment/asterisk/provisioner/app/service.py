@@ -1,12 +1,16 @@
 import asyncio
 import json
+import logging
 import os
+import uuid
 from pathlib import Path
 
 from app.ami import AmiClient
 from app.config import Settings
 from app.models import ConnectionResponse, ConnectionSpec
 from app.renderer import destination_uri, render_dialplan, render_pjsip, section_id
+
+logger = logging.getLogger(__name__)
 
 
 class ProvisioningService:
@@ -26,10 +30,22 @@ class ProvisioningService:
     def _atomic_write(path_value: str, content: str, mode: int = 0o600) -> None:
         path = Path(path_value)
         path.parent.mkdir(parents=True, exist_ok=True)
-        temporary = path.with_suffix(f"{path.suffix}.tmp")
-        temporary.write_text(content, encoding="utf-8")
-        os.chmod(temporary, mode)
-        os.replace(temporary, path)
+        temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+        try:
+            temporary.write_text(content, encoding="utf-8")
+            os.chmod(temporary, mode)
+            os.replace(temporary, path)
+        finally:
+            temporary.unlink(missing_ok=True)
+
+    async def _restore(self, connections: dict[str, ConnectionSpec]) -> None:
+        try:
+            self._render(connections)
+            await self.ami.reload()
+        except Exception:
+            # Preserve the original provisioning exception while still making
+            # the rollback problem visible in the container logs.
+            logger.exception("Could not restore the previous FreePBX configuration")
 
     def _render(self, connections: dict[str, ConnectionSpec]) -> None:
         self._atomic_write(
@@ -61,11 +77,7 @@ class ProvisioningService:
                 await self.ami.reload()
                 self._save(connections)
             except Exception:
-                self._render(previous)
-                try:
-                    await self.ami.reload()
-                except Exception:
-                    pass
+                await self._restore(previous)
                 raise
         return await self.status(connection_id)
 
@@ -81,11 +93,7 @@ class ProvisioningService:
                 await self.ami.reload()
                 self._save(connections)
             except Exception:
-                self._render(previous)
-                try:
-                    await self.ami.reload()
-                except Exception:
-                    pass
+                await self._restore(previous)
                 raise
             return True
 
