@@ -1,0 +1,7 @@
+; Add this line once to /etc/asterisk/pjsip_custom.conf.
+; Never edit the FreePBX-generated /etc/asterisk/pjsip.conf.
+#include ai-agent-generated/pjsip.conf
+
+; Add this line once to /etc/asterisk/extensions_custom.conf.
+; Never edit the FreePBX-generated /etc/asterisk/extensions.conf.
+#include ai-agent-generated/extensions.conf

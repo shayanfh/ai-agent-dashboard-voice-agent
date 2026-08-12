@@ -1,6 +1,6 @@
 # LiveKit SIP setup
 
-Create this infrastructure once for the central Asterisk gateway. Customer provisioning must not
+Create this infrastructure once for the central FreePBX gateway. Customer provisioning must not
 create a LiveKit trunk per phone number. Replace the Asterisk address, then run:
 
 ```bash

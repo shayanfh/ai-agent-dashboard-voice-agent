@@ -14,7 +14,10 @@ class Settings(BaseSettings):
     livekit_sip_uri: str
     livekit_auth_username: str | None = None
     livekit_auth_password: str | None = None
-    livekit_transport_name: str = "transport-tls"
+    livekit_transport_name: str = "0.0.0.0-udp"
+    pjsip_udp_transport_name: str = "0.0.0.0-udp"
+    pjsip_tcp_transport_name: str = "0.0.0.0-tcp"
+    pjsip_tls_transport_name: str = "0.0.0.0-tls"
     twilio_signaling_cidrs: str = ""
     ami_host: str = "127.0.0.1"
     ami_port: int = 5038
@@ -28,6 +31,13 @@ class Settings(BaseSettings):
     @property
     def twilio_cidrs(self) -> list[str]:
         return [item.strip() for item in self.twilio_signaling_cidrs.split(",") if item.strip()]
+
+    def transport_name(self, protocol: str) -> str:
+        return {
+            "udp": self.pjsip_udp_transport_name,
+            "tcp": self.pjsip_tcp_transport_name,
+            "tls": self.pjsip_tls_transport_name,
+        }[protocol]
 
 
 @lru_cache

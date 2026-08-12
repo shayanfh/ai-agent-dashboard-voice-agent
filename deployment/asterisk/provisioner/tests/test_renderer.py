@@ -57,6 +57,7 @@ def test_registration_generates_provider_registration_and_port() -> None:
     pjsip = render_pjsip({connection_id: connection}, settings())
 
     assert "server_uri=sip:provider.test:5070" in pjsip
+    assert "transport=0.0.0.0-tls" in pjsip
     assert "line=yes" in pjsip
     assert "password=provider-secret" in pjsip
     assert provider_server_uri("provider.test", 5070) == "sip:provider.test:5070"

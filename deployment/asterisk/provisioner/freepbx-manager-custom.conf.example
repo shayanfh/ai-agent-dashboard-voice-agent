@@ -1,3 +1,5 @@
+; Merge this section into /etc/asterisk/manager_custom.conf.
+; Never replace existing FreePBX content and never expose AMI outside localhost.
 [ai-provisioner]
 secret=CHANGE_AMI_SECRET
 deny=0.0.0.0/0.0.0.0

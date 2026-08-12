@@ -1,6 +1,6 @@
 # AI Agent Dashboard Voice Agent
 
-Production-style runtime connecting customer SIP/Twilio calls through the central Asterisk
+Production-style runtime connecting customer SIP/Twilio calls through the central FreePBX
 gateway and LiveKit SIP to the existing
 Dashboard Backend. One explicitly named, concurrent worker (`ai-agent-dashboard-inbound`) loads
 each tenant's agent configuration by called number or extension; no customer configuration is
@@ -8,7 +8,7 @@ stored globally and the service never accesses PostgreSQL directly.
 
 ## Call flow
 
-Caller → Twilio/SIP provider → central Asterisk → LiveKit SIP → isolated LiveKit room → this worker
+Caller → Twilio/SIP provider → central FreePBX → LiveKit SIP → isolated LiveKit room → this worker
 → Dashboard Backend internal API.
 
 The worker extracts `sip.phoneNumber`, `sip.trunkPhoneNumber`, call/trunk IDs and extension from
