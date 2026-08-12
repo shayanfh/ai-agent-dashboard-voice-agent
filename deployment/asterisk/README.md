@@ -516,6 +516,49 @@ pjsip set logger off
 
 ## 14. Common failures
 
+### Provisioner returns `502 Bad Gateway`
+
+The Backend reached and authenticated to the provisioner, but config rendering, file writing, or
+the AMI reload failed. Rebuild the current provisioner and inspect the exception immediately after
+retrying the connection:
+
+```bash
+cd /opt/ai-agent-freepbx/provisioner
+docker compose up -d --build
+docker compose logs -f asterisk-provisioner
+```
+
+Test AMI from inside the container:
+
+```bash
+docker compose exec asterisk-provisioner python -c \
+  "import asyncio; from app.ami import AmiClient; from app.config import settings; print(asyncio.run(AmiClient(settings).command('core show version')))"
+```
+
+Also verify generated-file access:
+
+```bash
+docker compose exec asterisk-provisioner id
+docker compose exec asterisk-provisioner sh -c \
+  'test -w /etc/asterisk/ai-agent-generated && echo writable'
+sudo asterisk -rx "manager show user ai-provisioner"
+```
+
+For a Twilio connection, `TWILIO_SIGNALING_CIDRS` must be populated before provisioning. The new
+exception log states the exact missing setting or AMI/config error.
+
+### `Invalid HTTP request received` on port 9443
+
+The provisioner itself serves plain HTTP. Use this URL on a private network:
+
+```dotenv
+ASTERISK_PROVISIONER_URL=http://FREEPBX_PRIVATE_IP:9443
+```
+
+Do not use `https://` unless an internal TLS reverse proxy is actually installed in front of the
+container. Firewall TCP 9443 so only the Backend private IP can reach it; random public scans and
+TLS requests against the plain HTTP port produce this warning.
+
 ### `Unable to retrieve PJSIP transport 0.0.0.0-udp`
 
 The value in `PJSIP_UDP_TRANSPORT_NAME` does not match `pjsip show transports` exactly, or the

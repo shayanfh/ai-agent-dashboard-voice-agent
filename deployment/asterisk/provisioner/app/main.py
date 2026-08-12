@@ -1,3 +1,4 @@
+import logging
 import secrets
 import uuid
 
@@ -7,6 +8,7 @@ from app.config import settings
 from app.models import ConnectionResponse, ConnectionSpec
 from app.service import ProvisioningService
 
+logger = logging.getLogger(__name__)
 app = FastAPI(title="Asterisk Provisioner", docs_url=None, redoc_url=None)
 service = ProvisioningService(settings)
 
@@ -32,6 +34,9 @@ async def upsert_connection(
     try:
         return await service.upsert(str(connection_id), data)
     except (ValueError, RuntimeError, OSError) as exc:
+        logger.exception(
+            "FreePBX provisioning failed for connection %s", connection_id
+        )
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
