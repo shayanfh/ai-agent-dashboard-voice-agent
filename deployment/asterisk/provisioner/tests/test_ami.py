@@ -63,3 +63,37 @@ async def test_real_ami_error_is_still_rejected() -> None:
             FakeWriter(),
             {"Action": "Command", "Command": "pjsip reload"},
         )
+
+
+@pytest.mark.asyncio
+async def test_compatibility_response_without_command_body_does_not_hang() -> None:
+    reader = asyncio.StreamReader()
+    reader.feed_data(
+        b"Response: Error\r\nMessage: Command output follows\r\n\r\n"
+    )
+    reader.feed_eof()
+
+    response = await AmiClient(settings())._action(
+        reader,
+        FakeWriter(),
+        {"Action": "Command", "Command": "pjsip reload"},
+    )
+
+    assert response["Response"] == "Follows"
+    assert response["Output"] == []
+
+
+@pytest.mark.asyncio
+async def test_reload_uses_official_ami_reload_action(monkeypatch) -> None:
+    client = AmiClient(settings())
+    actions = []
+
+    async def execute(fields):
+        actions.append(fields)
+        return ""
+
+    monkeypatch.setattr(client, "_execute", execute)
+
+    await client.reload()
+
+    assert actions == [{"Action": "Reload"}]

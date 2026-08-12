@@ -10,10 +10,11 @@ class AmiClient:
 
     async def command(self, command: str) -> str:
         return await asyncio.wait_for(
-            self._command(command), timeout=self.settings.ami_timeout_seconds
+            self._execute({"Action": "Command", "Command": command}),
+            timeout=self.settings.ami_timeout_seconds,
         )
 
-    async def _command(self, command: str) -> str:
+    async def _execute(self, fields: dict[str, str]) -> str:
         reader, writer = await asyncio.open_connection(
             self.settings.ami_host, self.settings.ami_port
         )
@@ -29,9 +30,7 @@ class AmiClient:
                     "Events": "off",
                 },
             )
-            response = await self._action(
-                reader, writer, {"Action": "Command", "Command": command}
-            )
+            response = await self._action(reader, writer, fields)
             if response.get("Response") not in ("Success", "Follows"):
                 raise RuntimeError(response.get("Message", "AMI command failed"))
             return "\n".join(response.get("Output", []))
@@ -74,7 +73,15 @@ class AmiClient:
             output = result.setdefault("Output", [])
             if "--END COMMAND--" not in decoded:
                 while True:
-                    line = (await reader.readline()).decode(errors="replace").rstrip("\r\n")
+                    try:
+                        raw_line = await asyncio.wait_for(reader.readline(), timeout=0.5)
+                    except TimeoutError:
+                        # Some FreePBX/Asterisk builds send only the compatibility
+                        # header and omit the command-output terminator.
+                        break
+                    if not raw_line:
+                        break
+                    line = raw_line.decode(errors="replace").rstrip("\r\n")
                     if line == "--END COMMAND--" or not line:
                         break
                     output.append(line.removeprefix("Output: "))
@@ -83,5 +90,10 @@ class AmiClient:
         return result
 
     async def reload(self) -> None:
-        await self.command("pjsip reload")
-        await self.command("dialplan reload")
+        # Use the documented AMI action instead of parsing CLI `Command`
+        # output. A full reload refreshes both generated PJSIP and dialplan
+        # configuration and returns a normal Success/Error response.
+        await asyncio.wait_for(
+            self._execute({"Action": "Reload"}),
+            timeout=self.settings.ami_timeout_seconds,
+        )

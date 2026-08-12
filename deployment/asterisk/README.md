@@ -532,7 +532,7 @@ Test AMI from inside the container:
 
 ```bash
 docker compose exec asterisk-provisioner python -c \
-  "import asyncio; from app.ami import AmiClient; from app.config import settings; print(asyncio.run(AmiClient(settings).command('core show version')))"
+  "import asyncio; from app.ami import AmiClient; from app.config import settings; asyncio.run(AmiClient(settings).reload()); print('AMI reload ok')"
 ```
 
 Also verify generated-file access:
@@ -589,9 +589,8 @@ docker compose logs --tail=100 asterisk-provisioner
 
 ### AMI reports `Command output follows` as an error
 
-This is a FreePBX/Asterisk AMI compatibility response: the CLI command ran and its output follows,
-but some versions label the response as `Error` instead of `Follows`. Update and rebuild the
-provisioner; the AMI parser normalizes this response while continuing to reject real AMI errors:
+This is a FreePBX/Asterisk AMI CLI compatibility response. The provisioner no longer uses CLI
+`Command` for configuration reloads; it uses the official AMI `Reload` action. Update and rebuild:
 
 ```bash
 cd /opt/ai-agent-freepbx/provisioner
