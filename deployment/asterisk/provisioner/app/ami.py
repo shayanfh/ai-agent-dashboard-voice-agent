@@ -47,8 +47,9 @@ class AmiClient:
         )
         await writer.drain()
         raw = await reader.readuntil(b"\r\n\r\n")
+        decoded = raw.decode(errors="replace")
         result: dict[str, str | list[str]] = {}
-        for line in raw.decode(errors="replace").split("\r\n"):
+        for line in decoded.split("\r\n"):
             if ": " not in line:
                 continue
             key, value = line.split(": ", 1)
@@ -56,13 +57,27 @@ class AmiClient:
                 result.setdefault("Output", []).append(value)
             else:
                 result[key] = value
-        if result.get("Response") == "Follows":
+        command_output_follows = (
+            result.get("Response") == "Follows"
+            or (
+                fields.get("Action") == "Command"
+                and result.get("Response") == "Error"
+                and result.get("Message") == "Command output follows"
+            )
+        )
+        if command_output_follows:
+            # FreePBX/Asterisk versions differ here: some return
+            # `Response: Follows`, while others return `Response: Error` with
+            # the compatibility message `Command output follows` even though
+            # the CLI command ran successfully.
+            result["Response"] = "Follows"
             output = result.setdefault("Output", [])
-            while True:
-                line = (await reader.readline()).decode(errors="replace").rstrip("\r\n")
-                if line == "--END COMMAND--" or not line:
-                    break
-                output.append(line.removeprefix("Output: "))
+            if "--END COMMAND--" not in decoded:
+                while True:
+                    line = (await reader.readline()).decode(errors="replace").rstrip("\r\n")
+                    if line == "--END COMMAND--" or not line:
+                        break
+                    output.append(line.removeprefix("Output: "))
         if result.get("Response") == "Error":
             raise RuntimeError(str(result.get("Message", "AMI action failed")))
         return result

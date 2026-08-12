@@ -587,6 +587,17 @@ docker compose logs --tail=100 asterisk-provisioner
 
 `AMI_HOST` must remain `127.0.0.1` because the container uses host networking.
 
+### AMI reports `Command output follows` as an error
+
+This is a FreePBX/Asterisk AMI compatibility response: the CLI command ran and its output follows,
+but some versions label the response as `Error` instead of `Follows`. Update and rebuild the
+provisioner; the AMI parser normalizes this response while continuing to reject real AMI errors:
+
+```bash
+cd /opt/ai-agent-freepbx/provisioner
+docker compose up -d --build --force-recreate
+```
+
 ### SIP connects but there is no audio
 
 Recheck External Address, Local Networks, RTP port forwarding/firewall, provider media CIDRs, and
