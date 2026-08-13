@@ -5,7 +5,12 @@ import uuid
 from fastapi import Depends, FastAPI, Header, HTTPException, Response, status
 
 from app.config import settings
-from app.models import ConnectionResponse, ConnectionSpec
+from app.models import (
+    ConnectionResponse,
+    ConnectionSpec,
+    ExtensionResponse,
+    ExtensionSpec,
+)
 from app.service import ProvisioningService
 
 logger = logging.getLogger(__name__)
@@ -67,4 +72,46 @@ async def delete_connection(
     deleted = await service.delete(connection_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Connection not found")
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@app.put("/v1/extensions/{extension_id}", response_model=ExtensionResponse)
+async def upsert_extension(
+    extension_id: uuid.UUID,
+    data: ExtensionSpec,
+    _: None = Depends(authenticate),
+):
+    try:
+        return await service.upsert_extension(str(extension_id), data)
+    except (ValueError, RuntimeError, OSError) as exc:
+        logger.exception("FreePBX provisioning failed for extension %s", extension_id)
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@app.get("/v1/extensions/{resource_id}", response_model=ExtensionResponse)
+async def get_extension(
+    resource_id: str,
+    _: None = Depends(authenticate),
+):
+    try:
+        extension_id = str(uuid.UUID(resource_id.removeprefix("ext-")))
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="Extension not found") from exc
+    try:
+        return await service.extension_status(extension_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Extension not found") from exc
+
+
+@app.delete("/v1/extensions/{resource_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_extension(
+    resource_id: str,
+    _: None = Depends(authenticate),
+) -> Response:
+    try:
+        extension_id = str(uuid.UUID(resource_id.removeprefix("ext-")))
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="Extension not found") from exc
+    if not await service.delete_extension(extension_id):
+        raise HTTPException(status_code=404, detail="Extension not found")
     return Response(status_code=status.HTTP_204_NO_CONTENT)

@@ -1,11 +1,24 @@
 from urllib.parse import urlparse
 
 from app.config import Settings
-from app.models import ConnectionSpec
+from app.models import ConnectionSpec, ExtensionSpec
 
 
 def section_id(connection_id: str) -> str:
     return f"pc-{connection_id.replace('-', '')}"
+
+
+def extension_section_id(extension_id: str) -> str:
+    return f"ext-{extension_id.replace('-', '')}"
+
+
+def extension_route(company_id: object, extension: str) -> str:
+    company_hex = str(company_id).replace("-", "")
+    return f"x{company_hex}e{extension}"
+
+
+def tenant_context(company_id: object) -> str:
+    return f"ai-tenant-{str(company_id).replace('-', '')}"
 
 
 def sip_host(uri: str) -> str:
@@ -55,6 +68,8 @@ def _render_livekit(settings: Settings) -> list[str]:
         [
             "[ai-livekit]",
             "type=endpoint",
+            "context=ai-agent-transfer-inbound",
+            "allow_transfer=yes",
             f"transport={settings.livekit_transport_name}",
             "aors=ai-livekit-aor",
             "outbound_auth=ai-livekit-auth" if settings.livekit_auth_username else "",
@@ -71,7 +86,11 @@ def _render_livekit(settings: Settings) -> list[str]:
     return [line for line in lines if line != ""] + [""]
 
 
-def render_pjsip(connections: dict[str, ConnectionSpec], settings: Settings) -> str:
+def render_pjsip(
+    connections: dict[str, ConnectionSpec],
+    settings: Settings,
+    extensions: dict[str, ExtensionSpec] | None = None,
+) -> str:
     lines = _render_livekit(settings)
     if any(spec.mode == "twilio" for spec in connections.values()):
         if not settings.twilio_cidrs:
@@ -167,11 +186,49 @@ def render_pjsip(connections: dict[str, ConnectionSpec], settings: Settings) -> 
                 "",
             ]
         )
+    for extension_id, spec in sorted((extensions or {}).items()):
+        if not spec.enabled:
+            continue
+        sid = extension_section_id(extension_id)
+        lines.extend(
+            [
+                f"[{sid}-auth]",
+                "type=auth",
+                "auth_type=userpass",
+                f"username={spec.sip_username}",
+                f"password={spec.sip_password}",
+                "",
+                f"[{sid}-aor]",
+                "type=aor",
+                "max_contacts=1",
+                "remove_existing=yes",
+                "qualify_frequency=30",
+                "",
+                f"[{sid}]",
+                "type=endpoint",
+                f"transport={settings.transport_name(spec.transport)}",
+                f"context={tenant_context(spec.company_id)}",
+                f"auth={sid}-auth",
+                f"aors={sid}-aor",
+                "identify_by=auth_username,username",
+                f"callerid={spec.extension}",
+                "disallow=all",
+                "allow=ulaw,alaw",
+                "direct_media=no",
+                "rtp_symmetric=yes",
+                "force_rport=yes",
+                "rewrite_contact=yes",
+                "dtmf_mode=rfc4733",
+                "",
+            ]
+        )
     return "\n".join(line for line in lines if line is not None).rstrip() + "\n"
 
 
 def render_dialplan(
-    connections: dict[str, ConnectionSpec], settings: Settings
+    connections: dict[str, ConnectionSpec],
+    settings: Settings,
+    extensions: dict[str, ExtensionSpec] | None = None,
 ) -> str:
     lines = [
         "; Managed by asterisk-provisioner. Do not edit.",
@@ -179,11 +236,7 @@ def render_dialplan(
     ]
     seen: set[str] = set()
     for connection_id, spec in sorted(connections.items()):
-        destinations: list[str] = []
-        if not spec.extension:
-            destinations.extend([spec.phone_number, spec.phone_number.removeprefix("+")])
-        if spec.extension:
-            destinations.append(spec.extension)
+        destinations = [spec.phone_number, spec.phone_number.removeprefix("+")]
         if spec.mode == "registration" and spec.auth_username:
             destinations.append(spec.auth_username)
         for destination in destinations:
@@ -193,7 +246,7 @@ def render_dialplan(
             lines.extend(
                 [
                     f"exten => {destination},1,Gosub(ai-agent-forward,s,1("
-                    f"{spec.phone_number},{connection_id},{spec.extension}))",
+                    f"{spec.phone_number},{connection_id}))",
                     " same => n,Hangup()",
                 ]
             )
@@ -233,4 +286,32 @@ def render_dialplan(
             " same => n,Return()",
         ]
     )
+    active_extensions = {
+        key: value for key, value in (extensions or {}).items() if value.enabled
+    }
+    lines.extend(["", "[ai-agent-transfer-inbound]"])
+    for extension_id, spec in sorted(active_extensions.items()):
+        sid = extension_section_id(extension_id)
+        route = extension_route(spec.company_id, spec.extension)
+        lines.extend(
+            [
+                f"exten => {route},1,NoOp(AI transfer to extension {spec.extension})",
+                f" same => n,Dial(PJSIP/{sid},30)",
+                " same => n,Hangup()",
+            ]
+        )
+
+    companies = sorted({str(spec.company_id) for spec in active_extensions.values()})
+    for company_id in companies:
+        lines.extend(["", f"[{tenant_context(company_id)}]"])
+        for extension_id, spec in sorted(active_extensions.items()):
+            if str(spec.company_id) != company_id:
+                continue
+            sid = extension_section_id(extension_id)
+            lines.extend(
+                [
+                    f"exten => {spec.extension},1,Dial(PJSIP/{sid},30)",
+                    " same => n,Hangup()",
+                ]
+            )
     return "\n".join(lines).rstrip() + "\n"

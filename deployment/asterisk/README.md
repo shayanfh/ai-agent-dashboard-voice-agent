@@ -473,9 +473,21 @@ Use this when the customer must set the destination in the provider panel:
 }
 ```
 
-Call `POST /api/v1/phone-connections/{id}/provision` after creation. For `ip_trunk`, copy the
+Call `POST /api/v1/phone-numbers/{phone_number_id}/provision` after creation. For `ip_trunk`, copy the
 returned `provider_setup.destination_sip_uri` into the provider panel. Twilio provisioning sets
 the Origination URI automatically.
+
+### Employee extensions
+
+Create extensions through `POST /api/v1/extensions`. The Backend generates the SIP password,
+stores it encrypted, and sends the endpoint to this provisioner. The create response shows the
+employee credentials once. Do not create these endpoints manually in the FreePBX GUI because the
+provisioner owns their PJSIP and dialplan sections.
+
+Each company receives a separate internal dialplan context, so extension `100` can safely exist in
+multiple companies. Employee phones can call only extensions in their own company context. AI
+transfers enter `ai-agent-transfer-inbound` using a tenant-scoped route and then ring the matching
+PJSIP endpoint.
 
 ## 13. End-to-end verification
 
@@ -488,6 +500,7 @@ sudo asterisk -rx "pjsip show endpoints"
 sudo asterisk -rx "pjsip show registrations"
 sudo asterisk -rx "dialplan show ai-agent-provider-inbound"
 sudo asterisk -rx "dialplan show ai-agent-forward"
+sudo asterisk -rx "dialplan show ai-agent-transfer-inbound"
 docker compose -f /opt/ai-agent-freepbx/provisioner/docker-compose.yml \
   logs --tail=100 asterisk-provisioner
 ```
@@ -500,6 +513,8 @@ Place an inbound test call and verify:
 4. The Backend creates the Call record and stores messages.
 5. Asterisk creates a WAV under `/var/spool/asterisk/monitor/ai-agent`.
 6. The uploader attaches the WAV to the Call and the Dashboard recording URL works.
+7. `pjsip show endpoints` lists provisioned employee extensions and their contacts after login.
+8. Asking the AI for an extension sends SIP REFER and rings only that tenant's endpoint.
 
 Useful live diagnostics:
 

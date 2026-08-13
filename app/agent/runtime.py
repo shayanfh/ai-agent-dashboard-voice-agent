@@ -5,7 +5,7 @@ from uuid import uuid4
 
 import structlog
 from livekit import agents, rtc
-from livekit.agents import Agent, AgentSession, llm, room_io
+from livekit.agents import Agent, AgentSession, function_tool, llm, room_io
 from livekit.agents.beta import EndCallTool
 
 from app.agent.context import CallContext
@@ -100,13 +100,11 @@ async def run_inbound_call(ctx: agents.JobContext, settings: Settings) -> None:
     async with DashboardBackendClient(settings) as backend:
         config = await backend.resolve_agent(
             phone_number=sip.called_number or sip.routing_number,
-            extension=sip.destination_extension,
             correlation_id=correlation_id,
         )
         created = await backend.create_call(
             CallCreate(
                 phone_number=sip.called_number or sip.routing_number,
-                extension=sip.destination_extension,
                 caller_number=sip.caller_number,
                 livekit_room_name=sip.room_name,
                 metadata={
@@ -153,6 +151,42 @@ async def run_inbound_call(ctx: agents.JobContext, settings: Settings) -> None:
             ),
             on_tool_called=on_end_call_tool_called,
         )
+
+        @function_tool()
+        async def transfer_to_extension(extension: str) -> str:
+            """Transfer the caller to an active employee extension after confirmation.
+
+            Args:
+                extension: The numeric internal extension explicitly requested by the caller.
+            """
+            try:
+                target = await backend.resolve_transfer_target(
+                    call_context.call_id,
+                    extension,
+                    correlation_id=call_context.correlation_id,
+                )
+                await ctx.transfer_sip_participant(
+                    participant,
+                    target.sip_uri,
+                    play_dialtone=True,
+                )
+            except Exception as exc:
+                log.warning(
+                    "call_transfer_failed",
+                    requested_extension=extension,
+                    error_type=type(exc).__name__,
+                )
+                raise llm.ToolError(
+                    "That extension is unavailable. Continue helping the caller."
+                ) from exc
+            call_context.was_transferred = True
+            call_context.transfer_extension = target.extension
+            log.info(
+                "call_transferred",
+                extension_id=target.extension_id,
+                extension=target.extension,
+            )
+            return f"The caller was transferred to extension {target.extension}."
         session: AgentSession[None] = AgentSession(
             vad=create_vad(),
             stt=create_stt(config, settings),
@@ -183,7 +217,7 @@ async def run_inbound_call(ctx: agents.JobContext, settings: Settings) -> None:
             room=ctx.room,
             agent=Agent(
                 instructions=compose_instructions(config),
-                tools=[end_call_tool],
+                tools=[end_call_tool, transfer_to_extension],
             ),
             room_options=room_io.RoomOptions(participant_identity=sip.participant_identity),
         )

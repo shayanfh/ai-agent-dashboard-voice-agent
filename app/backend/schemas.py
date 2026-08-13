@@ -28,7 +28,6 @@ class ResolvedAgent(BaseModel):
 
 class CallCreate(BaseModel):
     phone_number: str
-    extension: str | None = None
     caller_number: str | None = None
     livekit_room_name: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -39,6 +38,13 @@ class CallCreated(BaseModel):
     company_id: str
     agent_id: str | None
     status: str
+
+
+class TransferTarget(BaseModel):
+    extension_id: str
+    extension: str
+    display_name: str
+    sip_uri: str
 
 
 class Speaker(StrEnum):

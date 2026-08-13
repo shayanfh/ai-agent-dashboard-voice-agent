@@ -3,7 +3,7 @@
 Production-style runtime connecting customer SIP/Twilio calls through the central FreePBX
 gateway and LiveKit SIP to the existing
 Dashboard Backend. One explicitly named, concurrent worker (`ai-agent-dashboard-inbound`) loads
-each tenant's agent configuration by called number or extension; no customer configuration is
+each tenant's agent configuration by called number; no customer configuration is
 stored globally and the service never accesses PostgreSQL directly.
 
 ## Call flow
@@ -11,7 +11,7 @@ stored globally and the service never accesses PostgreSQL directly.
 Caller → Twilio/SIP provider → central FreePBX → LiveKit SIP → isolated LiveKit room → this worker
 → Dashboard Backend internal API.
 
-The worker extracts `sip.phoneNumber`, `sip.trunkPhoneNumber`, call/trunk IDs and extension from
+The worker extracts `sip.phoneNumber`, `sip.trunkPhoneNumber`, and call/trunk IDs from
 the SIP participant. When Asterisk recording is enabled it also extracts the forwarded
 `X-Asterisk-LinkedID`. It resolves the agent, creates the call, builds tenant-scoped STT/LLM/TTS
 objects, greets immediately, persists committed conversation items, and completes the call.
@@ -41,8 +41,9 @@ the internal API key.
 
 ## Backend contract currently used
 
-- `GET /api/v1/internal/voice/resolve-agent?phone_number=...&extension=...`
+- `GET /api/v1/internal/voice/resolve-agent?phone_number=...`
 - `POST /api/v1/internal/voice/calls`
+- `POST /api/v1/internal/voice/calls/{call_id}/transfer-target`
 - `POST /api/v1/internal/voice/calls/{call_id}/messages`
 - `POST /api/v1/internal/voice/calls/{call_id}/complete`
 - `PATCH /api/v1/internal/voice/calls/{call_id}/recording`
@@ -50,10 +51,10 @@ the internal API key.
 Asterisk uploads completed WAV files directly to
 `POST /api/v1/internal/voice/recordings/asterisk`; the Voice Agent never proxies recording audio.
 
-The current Dashboard Backend does not yet expose secure internal endpoints for knowledge search,
-request creation, business information, usage reporting, or status updates. The runtime therefore
-does not expose tools that could falsely claim those operations succeeded. Add those endpoints to
-the backend contract before enabling those tools.
+The transfer-target endpoint accepts only a numeric extension and resolves it using the Call's
+company. The returned tenant route is passed to LiveKit `TransferSIPParticipant`; callers cannot
+choose an arbitrary phone number or SIP address. Other business operations still require secure
+backend endpoints before agent tools are enabled for them.
 
 ## SIP provisioning
 
@@ -100,6 +101,7 @@ End-to-end checklist:
 10. Caller/assistant messages appear in the Dashboard.
 11. Disconnecting stores duration, summary and outcome.
 12. Asterisk uploads WAV and the Call receives a recording URL.
+13. Asking for an active employee extension transfers the SIP caller back to FreePBX.
 
 Recording correlation is disabled by default. Set `ENABLE_CALL_RECORDING=true` only after the
 LiveKit header mapping and Asterisk uploader are installed.
@@ -133,3 +135,10 @@ conversation is finished, the tool plays a brief goodbye, closes the session, an
 room so the SIP caller is disconnected. It is hidden during the initial greeting and must not be
 used for silence, unclear speech, hold, transfer, or temporary hesitation. Agent-initiated calls
 are completed with `completion_reason=agent_hangup` before post-call analysis is persisted.
+
+### Employee extension transfer
+
+The `transfer_to_extension` tool confirms the requested internal number, asks the Backend for a
+tenant-scoped target, and uses LiveKit SIP REFER to return the caller to FreePBX. FreePBX then rings
+the registered employee endpoint. A successful transfer is stored on the Call using the extension
+number; an unavailable or cross-tenant extension is rejected and the AI continues the conversation.

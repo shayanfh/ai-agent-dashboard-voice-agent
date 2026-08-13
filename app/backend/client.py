@@ -12,6 +12,7 @@ from app.backend.schemas import (
     CallCreated,
     CallMessage,
     ResolvedAgent,
+    TransferTarget,
 )
 from app.core.config import Settings
 
@@ -91,11 +92,9 @@ class DashboardBackendClient:
         return response.is_success
 
     async def resolve_agent(
-        self, *, phone_number: str, extension: str | None = None, correlation_id: str
+        self, *, phone_number: str, correlation_id: str
     ) -> ResolvedAgent:
         params = {"phone_number": phone_number}
-        if extension:
-            params["extension"] = extension
         response = await self._request(
             "GET", "/api/v1/internal/voice/resolve-agent", params=params,
             correlation_id=correlation_id,
@@ -115,6 +114,18 @@ class DashboardBackendClient:
         )
         self._ensure_success(response)
         return CallCreated.model_validate(response.json())
+
+    async def resolve_transfer_target(
+        self, call_id: str, extension: str, *, correlation_id: str
+    ) -> TransferTarget:
+        response = await self._request(
+            "POST",
+            f"/api/v1/internal/voice/calls/{call_id}/transfer-target",
+            json={"extension": extension},
+            correlation_id=correlation_id,
+        )
+        self._ensure_success(response)
+        return TransferTarget.model_validate(response.json())
 
     async def append_call_message(
         self, call_id: str, data: CallMessage, *, correlation_id: str, idempotency_key: str

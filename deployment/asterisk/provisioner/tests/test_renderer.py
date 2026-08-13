@@ -1,8 +1,13 @@
 import uuid
 
 from app.config import Settings
-from app.models import ConnectionSpec
-from app.renderer import provider_server_uri, render_dialplan, render_pjsip
+from app.models import ConnectionSpec, ExtensionSpec
+from app.renderer import (
+    extension_route,
+    provider_server_uri,
+    render_dialplan,
+    render_pjsip,
+)
 
 
 def settings(**overrides) -> Settings:
@@ -63,18 +68,29 @@ def test_registration_generates_provider_registration_and_port() -> None:
     assert provider_server_uri("provider.test", 5070) == "sip:provider.test:5070"
 
 
-def test_extension_connections_do_not_claim_ambiguous_did_route() -> None:
-    first_id, second_id = str(uuid.uuid4()), str(uuid.uuid4())
-    first = spec(extension="sales")
-    second = spec(extension="support")
-
-    dialplan = render_dialplan(
-        {first_id: first, second_id: second}, settings(enable_recording=False)
+def test_employee_extension_has_tenant_scoped_registration_and_transfer_route() -> None:
+    extension_id = str(uuid.uuid4())
+    company_id = uuid.uuid4()
+    extension = ExtensionSpec(
+        company_id=company_id,
+        extension="100",
+        display_name="Sales",
+        sip_username="company-a-100",
+        sip_password="long-random-password",
+        transport="tls",
     )
+    extensions = {extension_id: extension}
 
-    assert "exten => sales,1" in dialplan
-    assert "exten => support,1" in dialplan
-    assert "exten => +19714361744,1" not in dialplan
+    pjsip = render_pjsip({}, settings(), extensions)
+    dialplan = render_dialplan({}, settings(enable_recording=False), extensions)
+
+    assert "username=company-a-100" in pjsip
+    assert "password=long-random-password" in pjsip
+    assert "identify_by=auth_username,username" in pjsip
+    assert f"context=ai-tenant-{company_id.hex}" in pjsip
+    assert f"exten => {extension_route(company_id, '100')},1" in dialplan
+    assert "exten => 100,1,Dial(PJSIP/ext-" in dialplan
+    assert "context=ai-agent-transfer-inbound" in pjsip
 
 
 def test_twilio_requires_admin_managed_source_cidrs() -> None:

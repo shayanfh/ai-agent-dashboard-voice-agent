@@ -7,7 +7,12 @@ from pathlib import Path
 
 from app.ami import AmiClient
 from app.config import Settings
-from app.models import ConnectionResponse, ConnectionSpec
+from app.models import (
+    ConnectionResponse,
+    ConnectionSpec,
+    ExtensionResponse,
+    ExtensionSpec,
+)
 from app.renderer import destination_uri, render_dialplan, render_pjsip, section_id
 
 logger = logging.getLogger(__name__)
@@ -19,12 +24,28 @@ class ProvisioningService:
         self.ami = AmiClient(settings)
         self.lock = asyncio.Lock()
 
-    def _load(self) -> dict[str, ConnectionSpec]:
+    def _load(self) -> tuple[dict[str, ConnectionSpec], dict[str, ExtensionSpec]]:
         path = Path(self.settings.state_file)
         if not path.exists():
-            return {}
+            return {}, {}
         payload = json.loads(path.read_text(encoding="utf-8"))
-        return {key: ConnectionSpec.model_validate(value) for key, value in payload.items()}
+        if "connections" in payload or "extensions" in payload:
+            connection_payload = payload.get("connections") or {}
+            extension_payload = payload.get("extensions") or {}
+        else:
+            # Backward compatibility with the original flat connection state file.
+            connection_payload = payload
+            extension_payload = {}
+        return (
+            {
+                key: ConnectionSpec.model_validate(value)
+                for key, value in connection_payload.items()
+            },
+            {
+                key: ExtensionSpec.model_validate(value)
+                for key, value in extension_payload.items()
+            },
+        )
 
     @staticmethod
     def _atomic_write(path_value: str, content: str, mode: int = 0o600) -> None:
@@ -38,30 +59,52 @@ class ProvisioningService:
         finally:
             temporary.unlink(missing_ok=True)
 
-    async def _restore(self, connections: dict[str, ConnectionSpec]) -> None:
+    async def _restore(
+        self,
+        connections: dict[str, ConnectionSpec],
+        extensions: dict[str, ExtensionSpec],
+    ) -> None:
         try:
-            self._render(connections)
+            self._render(connections, extensions)
             await self.ami.reload()
         except Exception:
             # Preserve the original provisioning exception while still making
             # the rollback problem visible in the container logs.
             logger.exception("Could not restore the previous FreePBX configuration")
 
-    def _render(self, connections: dict[str, ConnectionSpec]) -> None:
+    def _render(
+        self,
+        connections: dict[str, ConnectionSpec],
+        extensions: dict[str, ExtensionSpec],
+    ) -> None:
         self._atomic_write(
             self.settings.generated_pjsip_file,
-            render_pjsip(connections, self.settings),
+            render_pjsip(connections, self.settings, extensions),
             mode=0o640,
         )
         self._atomic_write(
             self.settings.generated_dialplan_file,
-            render_dialplan(connections, self.settings),
+            render_dialplan(connections, self.settings, extensions),
             mode=0o640,
         )
 
-    def _save(self, connections: dict[str, ConnectionSpec]) -> None:
+    def _save(
+        self,
+        connections: dict[str, ConnectionSpec],
+        extensions: dict[str, ExtensionSpec],
+    ) -> None:
         content = json.dumps(
-            {key: value.model_dump(mode="json") for key, value in connections.items()},
+            {
+                "version": 2,
+                "connections": {
+                    key: value.model_dump(mode="json")
+                    for key, value in connections.items()
+                },
+                "extensions": {
+                    key: value.model_dump(mode="json")
+                    for key, value in extensions.items()
+                },
+            },
             indent=2,
             sort_keys=True,
         )
@@ -69,36 +112,37 @@ class ProvisioningService:
 
     async def upsert(self, connection_id: str, spec: ConnectionSpec) -> ConnectionResponse:
         async with self.lock:
-            connections = self._load()
+            connections, extensions = self._load()
             previous = dict(connections)
             connections[connection_id] = spec
             try:
-                self._render(connections)
+                self._render(connections, extensions)
                 await self.ami.reload()
-                self._save(connections)
+                self._save(connections, extensions)
             except Exception:
-                await self._restore(previous)
+                await self._restore(previous, extensions)
                 raise
         return await self.status(connection_id)
 
     async def delete(self, connection_id: str) -> bool:
         async with self.lock:
-            connections = self._load()
+            connections, extensions = self._load()
             if connection_id not in connections:
                 return False
             previous = dict(connections)
             del connections[connection_id]
             try:
-                self._render(connections)
+                self._render(connections, extensions)
                 await self.ami.reload()
-                self._save(connections)
+                self._save(connections, extensions)
             except Exception:
-                await self._restore(previous)
+                await self._restore(previous, extensions)
                 raise
             return True
 
     async def status(self, connection_id: str) -> ConnectionResponse:
-        spec = self._load().get(connection_id)
+        connections, _ = self._load()
+        spec = connections.get(connection_id)
         if not spec:
             raise KeyError(connection_id)
         state = "configured"
@@ -120,4 +164,49 @@ class ProvisioningService:
             )
         return ConnectionResponse(
             resource_id=f"pc-{connection_id}", state=state, provider_setup=setup
+        )
+
+    async def upsert_extension(
+        self, extension_id: str, spec: ExtensionSpec
+    ) -> ExtensionResponse:
+        async with self.lock:
+            connections, extensions = self._load()
+            previous = dict(extensions)
+            extensions[extension_id] = spec
+            try:
+                self._render(connections, extensions)
+                await self.ami.reload()
+                self._save(connections, extensions)
+            except Exception:
+                await self._restore(connections, previous)
+                raise
+        return ExtensionResponse(
+            resource_id=f"ext-{extension_id}",
+            state="configured" if spec.enabled else "disabled",
+        )
+
+    async def delete_extension(self, extension_id: str) -> bool:
+        async with self.lock:
+            connections, extensions = self._load()
+            if extension_id not in extensions:
+                return False
+            previous = dict(extensions)
+            del extensions[extension_id]
+            try:
+                self._render(connections, extensions)
+                await self.ami.reload()
+                self._save(connections, extensions)
+            except Exception:
+                await self._restore(connections, previous)
+                raise
+        return True
+
+    async def extension_status(self, extension_id: str) -> ExtensionResponse:
+        _, extensions = self._load()
+        spec = extensions.get(extension_id)
+        if not spec:
+            raise KeyError(extension_id)
+        return ExtensionResponse(
+            resource_id=f"ext-{extension_id}",
+            state="configured" if spec.enabled else "disabled",
         )

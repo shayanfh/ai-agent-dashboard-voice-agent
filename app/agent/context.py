@@ -16,6 +16,7 @@ class CallContext:
     sequence_number: int = 0
     request_created: bool = False
     was_transferred: bool = False
+    transfer_extension: str | None = None
     completed: bool = False
     started_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     transcript: list[tuple[str, str]] = field(default_factory=list)

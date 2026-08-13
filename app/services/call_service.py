@@ -64,10 +64,7 @@ class CallLifecycleService:
                     summary=analysis.summary,
                     outcome=analysis.outcome,
                     was_transferred=self.context.was_transferred,
-                    transfer_number=(
-                        self.context.agent_configuration.transfer_number
-                        if self.context.was_transferred else None
-                    ),
+                    transfer_number=self.context.transfer_extension,
                     ended_at=ended,
                     duration_seconds=duration,
                     extracted_data=extracted_data,

@@ -68,3 +68,29 @@ async def test_create_call_uses_idempotency_key(settings: Settings) -> None:
             idempotency_key="sip-call-1",
         )
     assert result.call_id == "call"
+
+
+@pytest.mark.asyncio
+async def test_resolve_transfer_target_uses_internal_call_scope(settings: Settings) -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path.endswith("/calls/call-1/transfer-target")
+        assert request.method == "POST"
+        assert request.content == b'{"extension":"100"}'
+        return httpx.Response(
+            200,
+            json={
+                "extension_id": "extension-id",
+                "extension": "100",
+                "display_name": "Sales",
+                "sip_uri": "sip:tenant-route@pbx.test:5060;transport=udp",
+            },
+        )
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(handler), base_url="http://backend.test"
+    ) as http_client:
+        result = await DashboardBackendClient(
+            settings, http_client
+        ).resolve_transfer_target("call-1", "100", correlation_id="c")
+    assert result.extension == "100"
+    assert result.sip_uri.startswith("sip:tenant-route@")

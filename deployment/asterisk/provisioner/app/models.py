@@ -15,7 +15,6 @@ class ConnectionSpec(BaseModel):
     provider: Literal["twilio", "generic_sip"]
     mode: Literal["twilio", "registration", "ip_trunk"]
     phone_number: str
-    extension: str = Field(default="", max_length=20)
     transport: Literal["udp", "tcp", "tls"] = "tcp"
     server_uri: str | None = Field(default=None, max_length=500)
     server_port: int | None = Field(default=None, ge=1, le=65535)
@@ -45,8 +44,6 @@ class ConnectionSpec(BaseModel):
     def validate_mode(self) -> "ConnectionSpec":
         if not E164.fullmatch(self.phone_number):
             raise ValueError("phone_number must be E.164")
-        if self.extension and not SAFE_ID.fullmatch(self.extension):
-            raise ValueError("extension contains unsupported characters")
         if self.mode == "twilio" and self.provider != "twilio":
             raise ValueError("twilio mode requires the twilio provider")
         if self.mode == "registration":
@@ -68,3 +65,31 @@ class ConnectionResponse(BaseModel):
     resource_id: str
     state: Literal["configured", "registering", "registered", "unregistered"]
     provider_setup: dict = Field(default_factory=dict)
+
+
+class ExtensionSpec(BaseModel):
+    company_id: uuid.UUID
+    extension: str = Field(pattern=r"^[1-9][0-9]{1,5}$")
+    display_name: str = Field(min_length=2, max_length=100)
+    sip_username: str = Field(min_length=4, max_length=100)
+    sip_password: str = Field(min_length=16, max_length=255)
+    transport: Literal["udp", "tcp", "tls"] = "udp"
+    enabled: bool = True
+
+    @field_validator("display_name", "sip_username", "sip_password")
+    @classmethod
+    def validate_configuration_value(cls, value: str) -> str:
+        if any(char in value for char in ("\r", "\n")):
+            raise ValueError("configuration values cannot contain newlines")
+        return value
+
+    @model_validator(mode="after")
+    def validate_username(self) -> "ExtensionSpec":
+        if not SAFE_ID.fullmatch(self.sip_username):
+            raise ValueError("sip_username contains unsupported characters")
+        return self
+
+
+class ExtensionResponse(BaseModel):
+    resource_id: str
+    state: Literal["configured", "disabled"]

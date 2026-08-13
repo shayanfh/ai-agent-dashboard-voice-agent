@@ -21,4 +21,5 @@ def test_default_instructions_require_clarification_instead_of_guessing() -> Non
     assert "Default language: fa" in instructions
     assert "clearly says goodbye" in instructions
     assert "use the end_call tool" in instructions
+    assert "transfer_to_extension" in instructions
     assert "Do not use it for silence" in instructions
