@@ -75,7 +75,7 @@ async def test_resolve_transfer_target_uses_internal_call_scope(settings: Settin
     async def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path.endswith("/calls/call-1/transfer-target")
         assert request.method == "POST"
-        assert request.content == b'{"extension":"100"}'
+        assert request.content == b'{"target":"Sales"}'
         return httpx.Response(
             200,
             json={
@@ -91,6 +91,6 @@ async def test_resolve_transfer_target_uses_internal_call_scope(settings: Settin
     ) as http_client:
         result = await DashboardBackendClient(
             settings, http_client
-        ).resolve_transfer_target("call-1", "100", correlation_id="c")
+        ).resolve_transfer_target("call-1", "Sales", correlation_id="c")
     assert result.extension == "100"
     assert result.sip_uri.startswith("sip:tenant-route@")

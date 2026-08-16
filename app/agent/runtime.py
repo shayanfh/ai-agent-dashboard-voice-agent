@@ -153,40 +153,41 @@ async def run_inbound_call(ctx: agents.JobContext, settings: Settings) -> None:
         )
 
         @function_tool()
-        async def transfer_to_extension(extension: str) -> str:
-            """Transfer the caller to an active employee extension after confirmation.
+        async def transfer_to_extension(target: str) -> str:
+            """Transfer the caller to an active extension after confirmation.
 
             Args:
-                extension: The numeric internal extension explicitly requested by the caller.
+                target: The numeric extension or display name explicitly requested by the caller.
             """
+            requested_target = target
             try:
-                target = await backend.resolve_transfer_target(
+                resolved_target = await backend.resolve_transfer_target(
                     call_context.call_id,
-                    extension,
+                    requested_target,
                     correlation_id=call_context.correlation_id,
                 )
                 await ctx.transfer_sip_participant(
                     participant,
-                    target.sip_uri,
+                    resolved_target.sip_uri,
                     play_dialtone=True,
                 )
             except Exception as exc:
                 log.warning(
                     "call_transfer_failed",
-                    requested_extension=extension,
+                    requested_target=requested_target,
                     error_type=type(exc).__name__,
                 )
                 raise llm.ToolError(
-                    "That extension is unavailable. Continue helping the caller."
+                    "That extension or display name is unavailable. Continue helping the caller."
                 ) from exc
             call_context.was_transferred = True
-            call_context.transfer_extension = target.extension
+            call_context.transfer_extension = resolved_target.extension
             log.info(
                 "call_transferred",
-                extension_id=target.extension_id,
-                extension=target.extension,
+                extension_id=resolved_target.extension_id,
+                extension=resolved_target.extension,
             )
-            return f"The caller was transferred to extension {target.extension}."
+            return f"The caller was transferred to extension {resolved_target.extension}."
         session: AgentSession[None] = AgentSession(
             vad=create_vad(),
             stt=create_stt(config, settings),

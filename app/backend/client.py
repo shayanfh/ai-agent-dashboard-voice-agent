@@ -116,12 +116,12 @@ class DashboardBackendClient:
         return CallCreated.model_validate(response.json())
 
     async def resolve_transfer_target(
-        self, call_id: str, extension: str, *, correlation_id: str
+        self, call_id: str, target: str, *, correlation_id: str
     ) -> TransferTarget:
         response = await self._request(
             "POST",
             f"/api/v1/internal/voice/calls/{call_id}/transfer-target",
-            json={"extension": extension},
+            json={"target": target},
             correlation_id=correlation_id,
         )
         self._ensure_success(response)

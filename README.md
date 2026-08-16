@@ -51,10 +51,11 @@ the internal API key.
 Asterisk uploads completed WAV files directly to
 `POST /api/v1/internal/voice/recordings/asterisk`; the Voice Agent never proxies recording audio.
 
-The transfer-target endpoint accepts only a numeric extension and resolves it using the Call's
-company. The returned tenant route is passed to LiveKit `TransferSIPParticipant`; callers cannot
-choose an arbitrary phone number or SIP address. Other business operations still require secure
-backend endpoints before agent tools are enabled for them.
+The transfer-target endpoint accepts a numeric extension or exact display name (case-insensitive)
+and resolves it using the Call's company. Employee names are not accepted. The returned tenant
+route is passed to LiveKit `TransferSIPParticipant`; callers cannot choose an arbitrary phone number
+or SIP address. Other business operations still require secure backend endpoints before agent tools
+are enabled for them.
 
 ## SIP provisioning
 
@@ -138,7 +139,8 @@ are completed with `completion_reason=agent_hangup` before post-call analysis is
 
 ### Employee extension transfer
 
-The `transfer_to_extension` tool confirms the requested internal number, asks the Backend for a
-tenant-scoped target, and uses LiveKit SIP REFER to return the caller to FreePBX. FreePBX then rings
-the registered employee endpoint. A successful transfer is stored on the Call using the extension
-number; an unavailable or cross-tenant extension is rejected and the AI continues the conversation.
+The `transfer_to_extension` tool confirms the requested internal number or display name, asks the
+Backend for a tenant-scoped target, and uses LiveKit SIP REFER to return the caller to FreePBX.
+FreePBX then rings the registered employee endpoint. A successful transfer is stored on the Call
+using the resolved extension number; an unavailable, ambiguous, or cross-tenant destination is
+rejected and the AI continues the conversation.
