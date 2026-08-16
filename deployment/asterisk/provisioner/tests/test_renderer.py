@@ -86,10 +86,12 @@ def test_employee_extension_has_tenant_scoped_registration_and_transfer_route() 
 
     assert "username=company-a-100" in pjsip
     assert "password=long-random-password" in pjsip
+    assert pjsip.count("[company-a-100]") == 2
+    assert "aors=company-a-100" in pjsip
     assert "identify_by=auth_username,username" in pjsip
     assert f"context=ai-tenant-{company_id.hex}" in pjsip
     assert f"exten => {extension_route(company_id, '100')},1" in dialplan
-    assert "exten => 100,1,Dial(PJSIP/ext-" in dialplan
+    assert "exten => 100,1,Dial(PJSIP/company-a-100,30)" in dialplan
     assert "context=ai-agent-transfer-inbound" in pjsip
 
 

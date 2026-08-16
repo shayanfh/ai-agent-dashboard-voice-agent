@@ -24,6 +24,10 @@ removes isolated PJSIP and dialplan sections for each customer and reloads Aster
 Asterisk records every routed call with `MixMonitor` and uploads the WAV file to the Backend.
 LiveKit Egress is not used.
 
+Employee endpoint and AoR object IDs intentionally equal the generated SIP username. Asterisk
+requires the AoR ID to match the user in the inbound REGISTER `To` header; changing those generated
+IDs to the extension UUID causes repeated 401/403 responses and eventual Fail2ban blocking.
+
 ## Server placement
 
 These are separate servers. Do not run the Voice Agent container on the FreePBX server:

@@ -190,6 +190,7 @@ def render_pjsip(
         if not spec.enabled:
             continue
         sid = extension_section_id(extension_id)
+        endpoint_id = spec.sip_username
         lines.extend(
             [
                 f"[{sid}-auth]",
@@ -198,18 +199,20 @@ def render_pjsip(
                 f"username={spec.sip_username}",
                 f"password={spec.sip_password}",
                 "",
-                f"[{sid}-aor]",
+                # Inbound REGISTER matches its To/Auth username against the
+                # AoR/endpoint object ID, not the auth object's username.
+                f"[{endpoint_id}]",
                 "type=aor",
                 "max_contacts=1",
                 "remove_existing=yes",
                 "qualify_frequency=30",
                 "",
-                f"[{sid}]",
+                f"[{endpoint_id}]",
                 "type=endpoint",
                 f"transport={settings.transport_name(spec.transport)}",
                 f"context={tenant_context(spec.company_id)}",
                 f"auth={sid}-auth",
-                f"aors={sid}-aor",
+                f"aors={endpoint_id}",
                 "identify_by=auth_username,username",
                 f"callerid={spec.extension}",
                 "disallow=all",
@@ -290,13 +293,12 @@ def render_dialplan(
         key: value for key, value in (extensions or {}).items() if value.enabled
     }
     lines.extend(["", "[ai-agent-transfer-inbound]"])
-    for extension_id, spec in sorted(active_extensions.items()):
-        sid = extension_section_id(extension_id)
+    for _extension_id, spec in sorted(active_extensions.items()):
         route = extension_route(spec.company_id, spec.extension)
         lines.extend(
             [
                 f"exten => {route},1,NoOp(AI transfer to extension {spec.extension})",
-                f" same => n,Dial(PJSIP/{sid},30)",
+                f" same => n,Dial(PJSIP/{spec.sip_username},30)",
                 " same => n,Hangup()",
             ]
         )
@@ -304,13 +306,12 @@ def render_dialplan(
     companies = sorted({str(spec.company_id) for spec in active_extensions.values()})
     for company_id in companies:
         lines.extend(["", f"[{tenant_context(company_id)}]"])
-        for extension_id, spec in sorted(active_extensions.items()):
+        for _extension_id, spec in sorted(active_extensions.items()):
             if str(spec.company_id) != company_id:
                 continue
-            sid = extension_section_id(extension_id)
             lines.extend(
                 [
-                    f"exten => {spec.extension},1,Dial(PJSIP/{sid},30)",
+                    f"exten => {spec.extension},1,Dial(PJSIP/{spec.sip_username},30)",
                     " same => n,Hangup()",
                 ]
             )
