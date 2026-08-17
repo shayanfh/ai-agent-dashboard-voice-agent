@@ -45,6 +45,7 @@ def test_ip_trunk_generates_identify_and_did_route() -> None:
     assert "match=203.0.113.10/32" in pjsip
     assert "exten => +19714361744,1,Gosub(ai-agent-forward" in dialplan
     assert "Dial(PJSIP/${ARG1}@ai-livekit" in dialplan
+    assert "Set(__TRANSFER_CONTEXT=ai-agent-transfer-inbound)" in dialplan
 
 
 def test_registration_generates_provider_registration_and_port() -> None:

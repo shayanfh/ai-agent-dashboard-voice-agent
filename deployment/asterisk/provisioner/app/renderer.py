@@ -258,6 +258,10 @@ def render_dialplan(
             "",
             "[ai-agent-forward]",
             "exten => s,1,NoOp(Forwarding ${ARG1} connection ${ARG2} to LiveKit)",
+            # res_pjsip_refer prefers TRANSFER_CONTEXT over the endpoint context,
+            # and FreePBX sets it globally to from-internal-xfer-dest. Override it
+            # on the LiveKit leg so REFER targets resolve to the transfer routes.
+            " same => n,Set(__TRANSFER_CONTEXT=ai-agent-transfer-inbound)",
         ]
     )
     if settings.enable_recording:
