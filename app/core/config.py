@@ -41,6 +41,9 @@ class Settings(BaseSettings):
     asterisk_linked_id_wait_seconds: float = Field(default=2.0, ge=0, le=10)
     enable_usage_reporting: bool = True
     enable_debug_logging: bool = False
+    knowledge_cache_max_entries: int = Field(default=128, ge=1, le=10_000)
+    knowledge_retrieval_top_k: int = Field(default=4, ge=1, le=12)
+    knowledge_retrieval_max_chars: int = Field(default=6000, ge=500, le=30_000)
 
     @model_validator(mode="after")
     def validate_provider_credentials(self) -> "Settings":

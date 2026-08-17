@@ -5,17 +5,19 @@ from uuid import uuid4
 
 import structlog
 from livekit import agents, rtc
-from livekit.agents import Agent, AgentSession, function_tool, llm, room_io
+from livekit.agents import AgentSession, function_tool, llm, room_io
 from livekit.agents.beta import EndCallTool
 
 from app.agent.context import CallContext
 from app.agent.instructions import compose_instructions
+from app.agent.knowledge_agent import KnowledgeAgent
 from app.backend.client import DashboardBackendClient
-from app.backend.schemas import CallCreate
+from app.backend.schemas import CallCreate, KnowledgeSnapshot
 from app.core.config import Settings
 from app.core.exceptions import CallerNotFoundError
 from app.providers.factories import create_llm, create_stt, create_tts, create_vad
 from app.services.call_service import CallLifecycleService
+from app.services.knowledge_service import KnowledgeIndex, knowledge_cache
 from app.services.summary_service import OpenAICallAnalyzer
 from app.services.transcript_service import TranscriptService
 from app.telephony.attributes import extract_sip_call_info, parse_remote_sip_headers
@@ -102,6 +104,17 @@ async def run_inbound_call(ctx: agents.JobContext, settings: Settings) -> None:
             phone_number=sip.called_number or sip.routing_number,
             correlation_id=correlation_id,
         )
+        knowledge_task = asyncio.create_task(
+            knowledge_cache.get(
+                agent_id=config.agent_id,
+                version=config.knowledge_version,
+                max_entries=settings.knowledge_cache_max_entries,
+                loader=lambda: backend.get_knowledge_snapshot(
+                    agent_id=config.agent_id,
+                    correlation_id=correlation_id,
+                ),
+            )
+        )
         created = await backend.create_call(
             CallCreate(
                 phone_number=sip.called_number or sip.routing_number,
@@ -119,6 +132,22 @@ async def run_inbound_call(ctx: agents.JobContext, settings: Settings) -> None:
             correlation_id=correlation_id,
             idempotency_key=f"call:{sip.sip_call_id or sip.room_name}",
         )
+        try:
+            knowledge = await knowledge_task
+        except Exception as exc:
+            logger.warning(
+                "knowledge_snapshot_unavailable",
+                agent_id=config.agent_id,
+                version=config.knowledge_version,
+                error_type=type(exc).__name__,
+            )
+            knowledge = KnowledgeIndex(
+                KnowledgeSnapshot(
+                    company_id=config.company_id,
+                    agent_id=config.agent_id,
+                    version=config.knowledge_version,
+                )
+            )
         call_context = CallContext(
             call_id=created.call_id,
             correlation_id=correlation_id,
@@ -216,9 +245,12 @@ async def run_inbound_call(ctx: agents.JobContext, settings: Settings) -> None:
 
         await session.start(
             room=ctx.room,
-            agent=Agent(
+            agent=KnowledgeAgent(
                 instructions=compose_instructions(config),
                 tools=[end_call_tool, transfer_to_extension],
+                knowledge=knowledge,
+                retrieval_top_k=settings.knowledge_retrieval_top_k,
+                retrieval_max_chars=settings.knowledge_retrieval_max_chars,
             ),
             room_options=room_io.RoomOptions(participant_identity=sip.participant_identity),
         )

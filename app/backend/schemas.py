@@ -24,6 +24,22 @@ class ResolvedAgent(BaseModel):
     stt_model: str | None = None
     llm_provider: str | None = None
     llm_model: str | None = None
+    knowledge_version: int = 1
+
+
+class KnowledgeEntry(BaseModel):
+    id: str
+    source: str
+    title: str
+    content: str
+    category: str | None = None
+
+
+class KnowledgeSnapshot(BaseModel):
+    company_id: str
+    agent_id: str
+    version: int
+    entries: list[KnowledgeEntry] = Field(default_factory=list)
 
 
 class CallCreate(BaseModel):

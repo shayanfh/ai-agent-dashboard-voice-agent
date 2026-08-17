@@ -42,6 +42,7 @@ the internal API key.
 ## Backend contract currently used
 
 - `GET /api/v1/internal/voice/resolve-agent?phone_number=...`
+- `GET /api/v1/internal/voice/knowledge-snapshot?agent_id=...`
 - `POST /api/v1/internal/voice/calls`
 - `POST /api/v1/internal/voice/calls/{call_id}/transfer-target`
 - `POST /api/v1/internal/voice/calls/{call_id}/messages`
@@ -56,6 +57,26 @@ and resolves it using the Call's company. Employee names are not accepted. The r
 route is passed to LiveKit `TransferSIPParticipant`; callers cannot choose an arbitrary phone number
 or SIP address. Other business operations still require secure backend endpoints before agent tools
 are enabled for them.
+
+## Knowledge Base latency and synchronization
+
+`resolve-agent` returns the company's monotonic `knowledge_version`. The worker caches a local
+snapshot under `(agent_id, knowledge_version)`. Calls using an already cached version perform no
+additional Knowledge Base download; the first call after a change downloads one snapshot while
+the normal Call creation request runs in parallel. Concurrent calls for the same new version share
+one in-flight snapshot request.
+
+For each completed caller turn, `KnowledgeAgent.on_user_turn_completed` runs a local multilingual
+BM25-style token search plus fuzzy title matching and injects only the best matching context before
+LLM generation. There is no HTTP request, remote vector search, embedding API request, or LLM tool
+round trip per question. Q&A and extracted document text are treated as untrusted factual data and
+cannot override platform instructions.
+
+```dotenv
+KNOWLEDGE_CACHE_MAX_ENTRIES=128
+KNOWLEDGE_RETRIEVAL_TOP_K=4
+KNOWLEDGE_RETRIEVAL_MAX_CHARS=6000
+```
 
 ## SIP provisioning
 

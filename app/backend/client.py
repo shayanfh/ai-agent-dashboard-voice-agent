@@ -11,6 +11,7 @@ from app.backend.schemas import (
     CallCreate,
     CallCreated,
     CallMessage,
+    KnowledgeSnapshot,
     ResolvedAgent,
     TransferTarget,
 )
@@ -103,6 +104,18 @@ class DashboardBackendClient:
             raise AgentNotFound("No configured agent matches the called number")
         self._ensure_success(response)
         return ResolvedAgent.model_validate(response.json())
+
+    async def get_knowledge_snapshot(
+        self, *, agent_id: str, correlation_id: str
+    ) -> KnowledgeSnapshot:
+        response = await self._request(
+            "GET",
+            "/api/v1/internal/voice/knowledge-snapshot",
+            params={"agent_id": agent_id},
+            correlation_id=correlation_id,
+        )
+        self._ensure_success(response)
+        return KnowledgeSnapshot.model_validate(response.json())
 
     async def create_call(
         self, data: CallCreate, *, correlation_id: str, idempotency_key: str
