@@ -28,6 +28,7 @@ outbound_events = OutboundEventMonitor(settings)
 
 @app.on_event("startup")
 async def start_outbound_monitor() -> None:
+    await service.reconcile()
     await outbound_events.start()
 
 

@@ -113,6 +113,13 @@ class ProvisioningService:
         )
         self._atomic_write(self.settings.state_file, content)
 
+    async def reconcile(self) -> None:
+        """Render persisted state after upgrades and load it into Asterisk."""
+        async with self.lock:
+            connections, extensions = self._load()
+            self._render(connections, extensions)
+            await self.ami.reload()
+
     async def upsert(self, connection_id: str, spec: ConnectionSpec) -> ConnectionResponse:
         async with self.lock:
             connections, extensions = self._load()

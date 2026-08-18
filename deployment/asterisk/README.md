@@ -415,6 +415,10 @@ sudo asterisk -rx "dialplan show ai-agent-outbound-keypad"
 docker compose logs -f asterisk-provisioner
 ```
 
+The provisioner reconciles its persisted connection and extension state on every startup. After
+an upgrade, rebuilding the image therefore regenerates newly introduced contexts; existing phone
+connections do not need to be disconnected merely to refresh the dialplan.
+
 ## 10. Create the one central LiveKit trunk
 
 Run this section on the **Voice Agent/deployment server** where the `lk` CLI is authenticated to

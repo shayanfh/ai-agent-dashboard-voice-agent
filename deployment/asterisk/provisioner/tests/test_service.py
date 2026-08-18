@@ -200,3 +200,32 @@ async def test_outbound_call_uses_tenant_connection_and_safe_context(tmp_path) -
     assert service.ami.originate_kwargs["context"] == "ai-agent-outbound-keypad"
     assert service.ami.originate_kwargs["variables"]["AI_KEY_1"] == "opt_out"
     assert service.ami.originate_kwargs["variables"]["AI_KEY_2"].endswith("e100")
+
+
+@pytest.mark.asyncio
+async def test_reconcile_renders_new_contexts_from_persisted_state(tmp_path) -> None:
+    config = Settings(
+        _env_file=None,
+        provisioner_api_key="test-key",
+        public_sip_uri="sip:asterisk.test:5060;transport=udp",
+        livekit_sip_uri="sip:livekit.test:5060;transport=udp",
+        ami_username="provisioner",
+        ami_password="secret",
+        state_file=str(tmp_path / "state.json"),
+        generated_pjsip_file=str(tmp_path / "pjsip.conf"),
+        generated_dialplan_file=str(tmp_path / "extensions.conf"),
+        enable_recording=False,
+    )
+    (tmp_path / "state.json").write_text(
+        json.dumps({"version": 2, "connections": {}, "extensions": {}})
+    )
+    service = ProvisioningService(config)
+    service.ami = FakeAmi()
+
+    await service.reconcile()
+
+    dialplan = (tmp_path / "extensions.conf").read_text()
+    assert "[ai-agent-outbound-ai]" in dialplan
+    assert "[ai-agent-outbound-broadcast]" in dialplan
+    assert "[ai-agent-outbound-keypad]" in dialplan
+    assert service.ami.reload_count == 1
