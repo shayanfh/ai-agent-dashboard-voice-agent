@@ -229,8 +229,8 @@ Add this section and replace the secret:
 secret=REPLACE_WITH_LONG_AMI_SECRET
 deny=0.0.0.0/0.0.0.0
 permit=127.0.0.1/255.255.255.255
-read=system,command
-write=system,command
+read=system,call,reporting,cdr,dialplan
+write=system,command,originate
 writetimeout=5000
 ```
 
@@ -243,7 +243,9 @@ sudo asterisk -rx "manager reload"
 sudo asterisk -rx "manager show user ai-provisioner"
 ```
 
-The user must show localhost permission and `system,command` privileges.
+The user must show localhost permission plus `call/reporting` read access and `originate` write
+access. These event permissions are required for outbound answered, busy, no-answer, hangup, and
+DTMF opt-out callbacks.
 
 ## 7. Install Asterisk recording upload
 
@@ -254,6 +256,8 @@ retry script, and configuration:
 cd /opt/ai-agent-freepbx
 sudo install -d -o asterisk -g asterisk -m 0750 \
   /var/spool/asterisk/monitor/ai-agent
+sudo install -d -o asterisk -g asterisk -m 2770 \
+  /var/lib/asterisk/sounds/ai-agent-generated
 sudo install -o root -g root -m 0755 upload-asterisk-recording.sh \
   /usr/local/bin/upload-asterisk-recording.sh
 sudo install -o root -g root -m 0755 retry-pending-asterisk-recordings.sh \
@@ -318,6 +322,11 @@ ENABLE_RECORDING=true
 RECORDING_DIRECTORY=/var/spool/asterisk/monitor/ai-agent
 RECORDING_UPLOADER=/usr/local/bin/upload-asterisk-recording.sh
 
+OUTBOUND_MEDIA_DIRECTORY=/var/lib/asterisk/sounds/ai-agent-generated
+MAX_OUTBOUND_MEDIA_BYTES=20971520
+BACKEND_OUTBOUND_CALLBACK_URL=https://api.example.com/api/v1/internal/outbound/events
+BACKEND_INTERNAL_API_KEY=<same-as-backend-INTERNAL_API_KEY>
+
 ASTERISK_GID=<numeric-asterisk-group-id>
 STATE_FILE=/var/lib/asterisk-provisioner/connections.json
 GENERATED_PJSIP_FILE=/etc/asterisk/ai-agent-generated/pjsip.conf
@@ -368,11 +377,43 @@ The Backend must reach port 9443 through the private network. Apply the migratio
 ```bash
 cd /path/to/ai-agent-dashboard
 docker compose exec api alembic upgrade head
-docker compose up -d --build api
-docker compose logs --tail=100 api
+docker compose up -d --build api celery-worker celery-beat
+docker compose logs --tail=100 api celery-worker celery-beat
 ```
 
-The Alembic head for this feature is `0007_asterisk_gateway`.
+The Alembic head for outbound campaigns is `0010_outbound_campaigns`.
+
+## Outbound campaign call paths
+
+The provisioner exposes authenticated endpoints used only by the Backend:
+
+```http
+PUT  /v1/outbound-media/{sha256}
+POST /v1/outbound-calls
+```
+
+AI campaigns call the recipient through the selected customer endpoint and execute
+`ai-agent-outbound-ai` after answer. That context adds tenant/campaign headers, starts
+`MixMonitor`, and bridges the answered channel to LiveKit. Broadcast campaigns execute
+`Playback(ai-agent-generated/<hash>)` without LiveKit. Keypad campaigns can repeat, bridge to AI,
+transfer to a generated tenant extension route, hang up, or emit an opt-out event.
+
+The AMI event monitor posts lifecycle updates to `BACKEND_OUTBOUND_CALLBACK_URL`. Keep this URL
+reachable from the FreePBX server over HTTPS or a private network. If it is missing, calls can be
+originated but Dashboard attempt states cannot advance reliably beyond `dialing`.
+
+After rebuilding, verify the generated contexts and media permissions:
+
+```bash
+cd /opt/ai-agent-freepbx/provisioner
+docker compose up -d --build --force-recreate
+docker compose exec asterisk-provisioner id
+sudo -u asterisk test -r /var/lib/asterisk/sounds/ai-agent-generated
+sudo asterisk -rx "dialplan show ai-agent-outbound-ai"
+sudo asterisk -rx "dialplan show ai-agent-outbound-broadcast"
+sudo asterisk -rx "dialplan show ai-agent-outbound-keypad"
+docker compose logs -f asterisk-provisioner
+```
 
 ## 10. Create the one central LiveKit trunk
 

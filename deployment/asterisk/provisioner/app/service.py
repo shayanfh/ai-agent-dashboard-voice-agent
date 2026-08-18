@@ -12,8 +12,16 @@ from app.models import (
     ConnectionSpec,
     ExtensionResponse,
     ExtensionSpec,
+    OutboundCallResponse,
+    OutboundCallSpec,
 )
-from app.renderer import destination_uri, render_dialplan, render_pjsip, section_id
+from app.renderer import (
+    destination_uri,
+    extension_route,
+    render_dialplan,
+    render_pjsip,
+    section_id,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -41,10 +49,7 @@ class ProvisioningService:
                 key: ConnectionSpec.model_validate(value)
                 for key, value in connection_payload.items()
             },
-            {
-                key: ExtensionSpec.model_validate(value)
-                for key, value in extension_payload.items()
-            },
+            {key: ExtensionSpec.model_validate(value) for key, value in extension_payload.items()},
         )
 
     @staticmethod
@@ -97,12 +102,10 @@ class ProvisioningService:
             {
                 "version": 2,
                 "connections": {
-                    key: value.model_dump(mode="json")
-                    for key, value in connections.items()
+                    key: value.model_dump(mode="json") for key, value in connections.items()
                 },
                 "extensions": {
-                    key: value.model_dump(mode="json")
-                    for key, value in extensions.items()
+                    key: value.model_dump(mode="json") for key, value in extensions.items()
                 },
             },
             indent=2,
@@ -166,9 +169,7 @@ class ProvisioningService:
             resource_id=f"pc-{connection_id}", state=state, provider_setup=setup
         )
 
-    async def upsert_extension(
-        self, extension_id: str, spec: ExtensionSpec
-    ) -> ExtensionResponse:
+    async def upsert_extension(self, extension_id: str, spec: ExtensionSpec) -> ExtensionResponse:
         async with self.lock:
             connections, extensions = self._load()
             previous = dict(extensions)
@@ -209,4 +210,51 @@ class ProvisioningService:
         return ExtensionResponse(
             resource_id=f"ext-{extension_id}",
             state="configured" if spec.enabled else "disabled",
+        )
+
+    async def originate(self, spec: OutboundCallSpec) -> OutboundCallResponse:
+        connections, _ = self._load()
+        connection = connections.get(str(spec.connection_id))
+        if not connection:
+            raise ValueError("Outbound phone connection is not provisioned")
+        if connection.mode in {"ip_trunk", "twilio"} and not connection.server_uri:
+            raise ValueError(
+                "This connection has no outbound SIP termination URI; configure server_uri first"
+            )
+        sid = section_id(str(spec.connection_id))
+        room_name = f"outbound-{spec.campaign_id.hex[:12]}-{spec.recipient_id.hex[:12]}"
+        variables = {
+            "AI_ATTEMPT_ID": str(spec.attempt_id),
+            "AI_COMPANY_ID": str(spec.company_id),
+            "AI_AGENT_ID": str(spec.agent_id or ""),
+            "AI_CAMPAIGN_ID": str(spec.campaign_id),
+            "AI_RECIPIENT_ID": str(spec.recipient_id),
+            "AI_CALL_ID": str(spec.call_id),
+            "AI_CALLER_ID": spec.caller_id,
+            "AI_DESTINATION": spec.destination_number,
+            "AI_ROOM_NAME": room_name,
+            "AI_MEDIA_ID": spec.media_id or "",
+        }
+        for digit, action in (spec.keypad_actions or {}).items():
+            key = {"*": "STAR", "#": "HASH"}.get(digit, digit)
+            if action.startswith("extension:"):
+                action = extension_route(spec.company_id, action.split(":", 1)[1])
+            variables[f"AI_KEY_{key}"] = action
+        context = {
+            "ai_conversation": "ai-agent-outbound-ai",
+            "voice_broadcast": "ai-agent-outbound-broadcast",
+            "voice_broadcast_keypad": "ai-agent-outbound-keypad",
+        }[spec.campaign_type]
+        await self.ami.originate(
+            action_id=str(spec.attempt_id),
+            channel=f"PJSIP/{spec.destination_number}@{sid}",
+            context=context,
+            caller_id=spec.caller_id,
+            timeout_seconds=spec.ring_timeout_seconds,
+            variables=variables,
+        )
+        return OutboundCallResponse(
+            accepted=True,
+            provider_call_id=str(spec.attempt_id),
+            room_name=room_name if spec.campaign_type == "ai_conversation" else None,
         )

@@ -51,6 +51,14 @@ class SipCallInfo:
     asterisk_linked_id: str | None
     room_name: str
     dispatch_metadata: dict[str, Any]
+    outbound: bool = False
+    outbound_company_id: str | None = None
+    outbound_agent_id: str | None = None
+    outbound_campaign_id: str | None = None
+    outbound_recipient_id: str | None = None
+    outbound_attempt_id: str | None = None
+    outbound_call_id: str | None = None
+    destination_number: str | None = None
 
     @property
     def routing_number(self) -> str | None:

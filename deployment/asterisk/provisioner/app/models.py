@@ -93,3 +93,42 @@ class ExtensionSpec(BaseModel):
 class ExtensionResponse(BaseModel):
     resource_id: str
     state: Literal["configured", "disabled"]
+
+
+class OutboundCallSpec(BaseModel):
+    attempt_id: uuid.UUID
+    connection_id: uuid.UUID
+    campaign_type: Literal["ai_conversation", "voice_broadcast", "voice_broadcast_keypad"]
+    destination_number: str
+    caller_id: str
+    ring_timeout_seconds: int = Field(default=45, ge=15, le=120)
+    media_id: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+    company_id: uuid.UUID
+    agent_id: uuid.UUID | None = None
+    campaign_id: uuid.UUID
+    recipient_id: uuid.UUID
+    call_id: uuid.UUID
+    keypad_actions: dict[str, str] | None = None
+
+    @model_validator(mode="after")
+    def validate_outbound(self) -> "OutboundCallSpec":
+        if not E164.fullmatch(self.destination_number) or not E164.fullmatch(self.caller_id):
+            raise ValueError("destination_number and caller_id must be E.164")
+        if self.campaign_type != "ai_conversation" and not self.media_id:
+            raise ValueError("media_id is required for broadcast calls")
+        if self.campaign_type == "ai_conversation" and not self.agent_id:
+            raise ValueError("agent_id is required for AI calls")
+        for digit, action in (self.keypad_actions or {}).items():
+            if digit not in set("0123456789*#"):
+                raise ValueError("keypad action keys must be DTMF digits")
+            if action not in {"hangup", "repeat", "ai", "opt_out"} and not re.fullmatch(
+                r"extension:[1-9][0-9]{1,5}", action
+            ):
+                raise ValueError("unsupported keypad action")
+        return self
+
+
+class OutboundCallResponse(BaseModel):
+    accepted: bool
+    provider_call_id: str
+    room_name: str | None = None

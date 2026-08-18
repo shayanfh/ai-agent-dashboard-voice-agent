@@ -1,27 +1,43 @@
+import asyncio
 import logging
+import os
 import secrets
 import uuid
+from pathlib import Path
+from typing import Annotated
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Response, status
+from fastapi import Depends, FastAPI, File, Header, HTTPException, Response, UploadFile, status
 
 from app.config import settings
+from app.events import OutboundEventMonitor
 from app.models import (
     ConnectionResponse,
     ConnectionSpec,
     ExtensionResponse,
     ExtensionSpec,
+    OutboundCallResponse,
+    OutboundCallSpec,
 )
 from app.service import ProvisioningService
 
 logger = logging.getLogger(__name__)
 app = FastAPI(title="Asterisk Provisioner", docs_url=None, redoc_url=None)
 service = ProvisioningService(settings)
+outbound_events = OutboundEventMonitor(settings)
+
+
+@app.on_event("startup")
+async def start_outbound_monitor() -> None:
+    await outbound_events.start()
+
+
+@app.on_event("shutdown")
+async def stop_outbound_monitor() -> None:
+    await outbound_events.stop()
 
 
 def authenticate(x_provisioner_api_key: str = Header(...)) -> None:
-    if not secrets.compare_digest(
-        x_provisioner_api_key, settings.provisioner_api_key
-    ):
+    if not secrets.compare_digest(x_provisioner_api_key, settings.provisioner_api_key):
         raise HTTPException(status_code=401, detail="Invalid provisioner API key")
 
 
@@ -39,9 +55,7 @@ async def upsert_connection(
     try:
         return await service.upsert(str(connection_id), data)
     except (ValueError, RuntimeError, OSError) as exc:
-        logger.exception(
-            "FreePBX provisioning failed for connection %s", connection_id
-        )
+        logger.exception("FreePBX provisioning failed for connection %s", connection_id)
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
@@ -115,3 +129,47 @@ async def delete_extension(
     if not await service.delete_extension(extension_id):
         raise HTTPException(status_code=404, detail="Extension not found")
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@app.put("/v1/outbound-media/{media_id}")
+async def upload_outbound_media(
+    media_id: str,
+    media: Annotated[UploadFile, File()],
+    _: None = Depends(authenticate),
+):
+    if len(media_id) != 64 or any(char not in "0123456789abcdef" for char in media_id):
+        raise HTTPException(status_code=422, detail="Invalid media ID")
+    content = await media.read(settings.max_outbound_media_bytes + 1)
+    if not content or len(content) > settings.max_outbound_media_bytes:
+        raise HTTPException(status_code=413, detail="Outbound media is empty or too large")
+    if not content.startswith(b"RIFF") or b"WAVE" not in content[:16]:
+        raise HTTPException(status_code=422, detail="Outbound media must be a WAV file")
+    await asyncio.to_thread(_write_outbound_media, media_id, content)
+    return {"media_id": media_id, "path": f"ai-agent-generated/{media_id}"}
+
+
+def _write_outbound_media(media_id: str, content: bytes) -> None:
+    directory = Path(settings.outbound_media_directory)
+    directory.mkdir(parents=True, exist_ok=True)
+    target = directory / f"{media_id}.wav"
+    temporary = directory / f".{media_id}.{uuid.uuid4().hex}.tmp"
+    try:
+        temporary.write_bytes(content)
+        os.chmod(temporary, 0o640)
+        os.replace(temporary, target)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+@app.post("/v1/outbound-calls", response_model=OutboundCallResponse, status_code=202)
+async def originate_outbound_call(
+    data: OutboundCallSpec,
+    _: None = Depends(authenticate),
+):
+    outbound_events.register(str(data.attempt_id))
+    try:
+        return await service.originate(data)
+    except (ValueError, RuntimeError, OSError) as exc:
+        outbound_events.unregister(str(data.attempt_id))
+        logger.exception("Outbound originate failed for attempt %s", data.attempt_id)
+        raise HTTPException(status_code=502, detail=str(exc)) from exc

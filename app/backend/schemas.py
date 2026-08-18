@@ -25,6 +25,7 @@ class ResolvedAgent(BaseModel):
     llm_provider: str | None = None
     llm_model: str | None = None
     knowledge_version: int = 1
+    outbound_context: dict[str, Any] | None = None
 
 
 class KnowledgeEntry(BaseModel):

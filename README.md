@@ -8,8 +8,12 @@ stored globally and the service never accesses PostgreSQL directly.
 
 ## Call flow
 
-Caller → Twilio/SIP provider → central FreePBX → LiveKit SIP → isolated LiveKit room → this worker
-→ Dashboard Backend internal API.
+Inbound: Caller → provider → central FreePBX → LiveKit SIP → isolated room → this worker.
+
+Outbound AI: Backend/Celery → FreePBX AMI → provider → recipient → LiveKit SIP → this worker.
+
+Voice Broadcast: Backend/Celery → FreePBX AMI → provider → recipient → cached WAV playback. The
+broadcast-only path does not create a LiveKit room or consume Voice Agent/LLM resources.
 
 The worker extracts `sip.phoneNumber`, `sip.trunkPhoneNumber`, and call/trunk IDs from
 the SIP participant. When Asterisk recording is enabled it also extracts the forwarded
@@ -42,6 +46,7 @@ the internal API key.
 ## Backend contract currently used
 
 - `GET /api/v1/internal/voice/resolve-agent?phone_number=...`
+- `GET /api/v1/internal/voice/resolve-agent-by-id?agent_id=...&company_id=...&call_id=...`
 - `GET /api/v1/internal/voice/knowledge-snapshot?agent_id=...`
 - `POST /api/v1/internal/voice/calls`
 - `POST /api/v1/internal/voice/calls/{call_id}/transfer-target`
@@ -57,6 +62,13 @@ and resolves it using the Call's company. Employee names are not accepted. The r
 route is passed to LiveKit `TransferSIPParticipant`; callers cannot choose an arbitrary phone number
 or SIP address. Other business operations still require secure backend endpoints before agent tools
 are enabled for them.
+
+For an outbound AI leg, the worker synchronously reads Asterisk's `X-Company-ID`, `X-Agent-ID`,
+`X-Campaign-ID`, `X-Recipient-ID`, and `X-Call-ID` headers. The Backend verifies that the existing
+Call, Agent, and Company belong to the same tenant before returning agent configuration. The worker
+reuses the Call created by the campaign dispatcher instead of creating a duplicate. Recipient
+fields and the campaign objective are added as untrusted outbound context, and the opening turn
+identifies the company, discloses the AI assistant, and states the purpose of the call.
 
 ## Knowledge Base latency and synchronization
 

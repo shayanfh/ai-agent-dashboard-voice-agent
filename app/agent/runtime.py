@@ -49,7 +49,9 @@ async def run_inbound_call(ctx: agents.JobContext, settings: Settings) -> None:
     sip = extract_sip_call_info(
         participant, room_name=ctx.room.name, job_metadata=ctx.job.metadata
     )
-    if settings.enable_call_recording and not sip.asterisk_linked_id:
+    # Outbound routing data arrives as signed/internal X-* SIP headers and must
+    # be read synchronously; trunk attribute mappings are updated asynchronously.
+    if isinstance(participant, rtc.RemoteParticipant):
         try:
             response = await asyncio.wait_for(
                 ctx.room.local_participant.perform_rpc(
@@ -60,6 +62,14 @@ async def run_inbound_call(ctx: agents.JobContext, settings: Settings) -> None:
                             "include": [
                                 "X-Asterisk-LinkedID",
                                 "X-Destination-Extension",
+                                "X-Outbound-Call",
+                                "X-Company-ID",
+                                "X-Agent-ID",
+                                "X-Campaign-ID",
+                                "X-Recipient-ID",
+                                "X-Attempt-ID",
+                                "X-Call-ID",
+                                "X-Destination-Number",
                             ]
                         }
                     ),
@@ -72,11 +82,19 @@ async def run_inbound_call(ctx: agents.JobContext, settings: Settings) -> None:
                 asterisk_linked_id=headers.get("x-asterisk-linkedid"),
                 destination_extension=sip.destination_extension
                 or headers.get("x-destination-extension"),
+                outbound=headers.get("x-outbound-call", "").lower() == "true",
+                outbound_company_id=headers.get("x-company-id"),
+                outbound_agent_id=headers.get("x-agent-id"),
+                outbound_campaign_id=headers.get("x-campaign-id"),
+                outbound_recipient_id=headers.get("x-recipient-id"),
+                outbound_attempt_id=headers.get("x-attempt-id"),
+                outbound_call_id=headers.get("x-call-id"),
+                destination_number=headers.get("x-destination-number"),
             )
         except (TimeoutError, ValueError, rtc.RpcError) as exc:
             logger.warning("sip_header_rpc_failed", error=str(exc))
 
-        if not sip.asterisk_linked_id:
+        if settings.enable_call_recording and not sip.asterisk_linked_id:
             sip = extract_sip_call_info(
                 participant, room_name=ctx.room.name, job_metadata=ctx.job.metadata
             )
@@ -96,14 +114,24 @@ async def run_inbound_call(ctx: agents.JobContext, settings: Settings) -> None:
         sip_trunk_id=sip.sip_trunk_id,
         participant_identity=sip.participant_identity,
     )
-    if not sip.routing_number:
+    if not sip.routing_number and not sip.outbound:
         raise CallerNotFoundError("Called number/extension is missing from SIP attributes")
 
     async with DashboardBackendClient(settings) as backend:
-        config = await backend.resolve_agent(
-            phone_number=sip.called_number or sip.routing_number,
-            correlation_id=correlation_id,
-        )
+        if sip.outbound:
+            if not all((sip.outbound_company_id, sip.outbound_agent_id, sip.outbound_call_id)):
+                raise CallerNotFoundError("Outbound routing headers are incomplete")
+            config = await backend.resolve_agent_by_id(
+                agent_id=sip.outbound_agent_id,
+                company_id=sip.outbound_company_id,
+                call_id=sip.outbound_call_id,
+                correlation_id=correlation_id,
+            )
+        else:
+            config = await backend.resolve_agent(
+                phone_number=sip.called_number or sip.routing_number,
+                correlation_id=correlation_id,
+            )
         knowledge_task = asyncio.create_task(
             knowledge_cache.get(
                 agent_id=config.agent_id,
@@ -115,23 +143,29 @@ async def run_inbound_call(ctx: agents.JobContext, settings: Settings) -> None:
                 ),
             )
         )
-        created = await backend.create_call(
-            CallCreate(
-                phone_number=sip.called_number or sip.routing_number,
-                caller_number=sip.caller_number,
-                livekit_room_name=sip.room_name,
-                metadata={
-                    "asterisk_linked_id": sip.asterisk_linked_id,
-                    "sip_call_id": sip.sip_call_id,
-                    "sip_call_id_full": sip.sip_call_id_full,
-                    "sip_trunk_id": sip.sip_trunk_id,
-                    "sip_rule_id": sip.sip_rule_id,
-                    "participant_identity": sip.participant_identity,
-                },
-            ),
-            correlation_id=correlation_id,
-            idempotency_key=f"call:{sip.sip_call_id or sip.room_name}",
-        )
+        if sip.outbound:
+            call_id = sip.outbound_call_id
+            created_company_id = config.company_id
+        else:
+            created = await backend.create_call(
+                CallCreate(
+                    phone_number=sip.called_number or sip.routing_number,
+                    caller_number=sip.caller_number,
+                    livekit_room_name=sip.room_name,
+                    metadata={
+                        "asterisk_linked_id": sip.asterisk_linked_id,
+                        "sip_call_id": sip.sip_call_id,
+                        "sip_call_id_full": sip.sip_call_id_full,
+                        "sip_trunk_id": sip.sip_trunk_id,
+                        "sip_rule_id": sip.sip_rule_id,
+                        "participant_identity": sip.participant_identity,
+                    },
+                ),
+                correlation_id=correlation_id,
+                idempotency_key=f"call:{sip.sip_call_id or sip.room_name}",
+            )
+            call_id = created.call_id
+            created_company_id = created.company_id
         try:
             knowledge = await knowledge_task
         except Exception as exc:
@@ -149,9 +183,9 @@ async def run_inbound_call(ctx: agents.JobContext, settings: Settings) -> None:
                 )
             )
         call_context = CallContext(
-            call_id=created.call_id,
+            call_id=call_id,
             correlation_id=correlation_id,
-            company_id=config.company_id,
+            company_id=created_company_id,
             agent_id=config.agent_id,
             sip=sip,
             agent_configuration=config,
@@ -254,10 +288,29 @@ async def run_inbound_call(ctx: agents.JobContext, settings: Settings) -> None:
             ),
             room_options=room_io.RoomOptions(participant_identity=sip.participant_identity),
         )
-        greeting = config.greeting_message or f"Hello, you are speaking with {config.agent_name}."
-        await session.generate_reply(
-            instructions=f"Say this greeting once, naturally, in {config.language}: {greeting}"
-        )
+        if sip.outbound:
+            recipient = (config.outbound_context or {}).get("recipient") or {}
+            first_name = recipient.get("first_name") or ""
+            objective = (config.outbound_context or {}).get("objective") or (
+                "the reason for this call"
+            )
+            outbound_language = recipient.get("language") or config.language
+            await session.generate_reply(
+                instructions=(
+                    f"Start the outbound call naturally in {outbound_language}. "
+                    f"Address the recipient as {first_name!r} if available, identify "
+                    "the company, disclose that you are an AI assistant, and briefly "
+                    f"state this purpose: {objective}. "
+                    "Then pause for their response."
+                )
+            )
+        else:
+            greeting = config.greeting_message or (
+                f"Hello, you are speaking with {config.agent_name}."
+            )
+            await session.generate_reply(
+                instructions=f"Say this greeting once, naturally, in {config.language}: {greeting}"
+            )
         log.info("call_session_started")
         reason = "caller_disconnected"
         try:

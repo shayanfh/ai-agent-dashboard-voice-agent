@@ -27,6 +27,10 @@ class Settings(BaseSettings):
     enable_recording: bool = True
     recording_directory: str = "/var/spool/asterisk/monitor/ai-agent"
     recording_uploader: str = "/usr/local/bin/upload-asterisk-recording.sh"
+    outbound_media_directory: str = "/var/lib/asterisk/sounds/ai-agent-generated"
+    max_outbound_media_bytes: int = 20 * 1024 * 1024
+    backend_outbound_callback_url: str = ""
+    backend_internal_api_key: str = ""
 
     @property
     def twilio_cidrs(self) -> list[str]:

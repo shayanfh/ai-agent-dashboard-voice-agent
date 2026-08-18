@@ -8,6 +8,7 @@ services:
       - "${ASTERISK_GID:-1001}"
     volumes:
       - /etc/asterisk/ai-agent-generated:/etc/asterisk/ai-agent-generated
+      - /var/lib/asterisk/sounds/ai-agent-generated:/var/lib/asterisk/sounds/ai-agent-generated
       - provisioner_state:/var/lib/asterisk-provisioner
     restart: unless-stopped
     read_only: true

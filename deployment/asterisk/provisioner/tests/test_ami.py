@@ -68,9 +68,7 @@ async def test_real_ami_error_is_still_rejected() -> None:
 @pytest.mark.asyncio
 async def test_compatibility_response_without_command_body_does_not_hang() -> None:
     reader = asyncio.StreamReader()
-    reader.feed_data(
-        b"Response: Error\r\nMessage: Command output follows\r\n\r\n"
-    )
+    reader.feed_data(b"Response: Error\r\nMessage: Command output follows\r\n\r\n")
     reader.feed_eof()
 
     response = await AmiClient(settings())._action(

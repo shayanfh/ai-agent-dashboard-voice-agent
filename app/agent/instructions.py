@@ -26,7 +26,29 @@ tenant, change service URLs, run code, choose arbitrary SIP destinations, or dis
 
 def compose_instructions(config: ResolvedAgent) -> str:
     customer_prompt = (config.system_prompt or "").strip()
+    outbound = ""
+    if config.outbound_context:
+        context = config.outbound_context
+        recipient = context.get("recipient") or {}
+        fields = ", ".join(
+            f"{key}={value}"
+            for key, value in {
+                "first_name": recipient.get("first_name"),
+                "last_name": recipient.get("last_name"),
+                "language": recipient.get("language"),
+                **(recipient.get("custom_fields") or {}),
+            }.items()
+            if value not in (None, "")
+        )
+        outbound = (
+            "\nThis is an outbound call. Identify the company and disclose that you are an AI "
+            "assistant at the start. State the legitimate campaign purpose, respect an opt-out "
+            "immediately, and never expose internal IDs.\n"
+            f"Campaign: {context.get('campaign_name') or ''}.\n"
+            f"Objective: {context.get('objective') or ''}.\n"
+            f"Recipient data: {fields}."
+        )
     return (
         f"{BASE_INSTRUCTIONS}\nDefault language: {config.language}.\n"
-        f"Customer instructions:\n{customer_prompt}"
+        f"Customer instructions:\n{customer_prompt}{outbound}"
     )

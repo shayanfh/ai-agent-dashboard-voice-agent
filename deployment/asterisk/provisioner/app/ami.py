@@ -14,7 +14,16 @@ class AmiClient:
             timeout=self.settings.ami_timeout_seconds,
         )
 
-    async def _execute(self, fields: dict[str, str]) -> str:
+    async def action(
+        self, fields: dict[str, str | list[str]], action_id: str | None = None
+    ) -> dict:
+        return await asyncio.wait_for(
+            self._execute_action(fields, action_id), timeout=self.settings.ami_timeout_seconds
+        )
+
+    async def _execute_action(
+        self, fields: dict[str, str | list[str]], action_id: str | None = None
+    ) -> dict:
         reader, writer = await asyncio.open_connection(
             self.settings.ami_host, self.settings.ami_port
         )
@@ -30,20 +39,34 @@ class AmiClient:
                     "Events": "off",
                 },
             )
-            response = await self._action(reader, writer, fields)
+            response = await self._action(reader, writer, fields, action_id)
             if response.get("Response") not in ("Success", "Follows"):
                 raise RuntimeError(response.get("Message", "AMI command failed"))
-            return "\n".join(response.get("Output", []))
+            return response
         finally:
             writer.close()
             await writer.wait_closed()
 
-    async def _action(self, reader, writer, fields: dict[str, str]) -> dict:
-        action_id = uuid.uuid4().hex
+    async def _execute(self, fields: dict[str, str]) -> str:
+        response = await self._execute_action(fields)
+        return "\n".join(response.get("Output", []))
+
+    async def _action(
+        self,
+        reader,
+        writer,
+        fields: dict[str, str | list[str]],
+        action_id: str | None = None,
+    ) -> dict:
+        action_id = action_id or uuid.uuid4().hex
         payload = {**fields, "ActionID": action_id}
-        writer.write(
-            ("\r\n".join(f"{key}: {value}" for key, value in payload.items()) + "\r\n\r\n").encode()
-        )
+        lines: list[str] = []
+        for key, value in payload.items():
+            if isinstance(value, list):
+                lines.extend(f"{key}: {item}" for item in value)
+            else:
+                lines.append(f"{key}: {value}")
+        writer.write(("\r\n".join(lines) + "\r\n\r\n").encode())
         await writer.drain()
         raw = await reader.readuntil(b"\r\n\r\n")
         decoded = raw.decode(errors="replace")
@@ -56,13 +79,10 @@ class AmiClient:
                 result.setdefault("Output", []).append(value)
             else:
                 result[key] = value
-        command_output_follows = (
-            result.get("Response") == "Follows"
-            or (
-                fields.get("Action") == "Command"
-                and result.get("Response") == "Error"
-                and result.get("Message") == "Command output follows"
-            )
+        command_output_follows = result.get("Response") == "Follows" or (
+            fields.get("Action") == "Command"
+            and result.get("Response") == "Error"
+            and result.get("Message") == "Command output follows"
         )
         if command_output_follows:
             # FreePBX/Asterisk versions differ here: some return
@@ -96,4 +116,29 @@ class AmiClient:
         await asyncio.wait_for(
             self._execute({"Action": "Reload"}),
             timeout=self.settings.ami_timeout_seconds,
+        )
+
+    async def originate(
+        self,
+        *,
+        action_id: str,
+        channel: str,
+        context: str,
+        caller_id: str,
+        timeout_seconds: int,
+        variables: dict[str, str],
+    ) -> None:
+        await self.action(
+            {
+                "Action": "Originate",
+                "Channel": channel,
+                "Context": context,
+                "Exten": "s",
+                "Priority": "1",
+                "CallerID": caller_id,
+                "Timeout": str(timeout_seconds * 1000),
+                "Async": "true",
+                "Variable": [f"{key}={value}" for key, value in variables.items()],
+            },
+            action_id=action_id,
         )

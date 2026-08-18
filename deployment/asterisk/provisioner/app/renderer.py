@@ -118,10 +118,50 @@ def render_pjsip(
     for connection_id, spec in sorted(connections.items()):
         sid = section_id(connection_id)
         if spec.mode == "twilio":
-            continue
-        if spec.mode == "ip_trunk":
+            if not spec.server_uri:
+                continue
+            server_uri = provider_server_uri(spec.server_uri, spec.server_port)
             lines.extend(
                 [
+                    f"[{sid}-auth]",
+                    "type=auth",
+                    "auth_type=userpass",
+                    f"username={spec.auth_username}",
+                    f"password={spec.auth_password}",
+                    "",
+                    f"[{sid}-aor]",
+                    "type=aor",
+                    f"contact={server_uri}",
+                    "qualify_frequency=30",
+                    "",
+                    f"[{sid}]",
+                    "type=endpoint",
+                    f"transport={settings.transport_name(spec.transport)}",
+                    f"aors={sid}-aor",
+                    f"outbound_auth={sid}-auth",
+                    "from_user=" + spec.phone_number,
+                    f"from_domain={sip_host(server_uri)}",
+                    "disallow=all",
+                    "allow=ulaw,alaw",
+                    "direct_media=no",
+                    "rtp_symmetric=yes",
+                    "force_rport=yes",
+                    "rewrite_contact=yes",
+                    "",
+                ]
+            )
+            continue
+        if spec.mode == "ip_trunk":
+            server_uri = (
+                provider_server_uri(spec.server_uri, spec.server_port) if spec.server_uri else None
+            )
+            lines.extend(
+                [
+                    f"[{sid}-aor]" if server_uri else "",
+                    "type=aor" if server_uri else "",
+                    f"contact={server_uri}" if server_uri else "",
+                    "qualify_frequency=30" if server_uri else "",
+                    "" if server_uri else "",
                     f"[{sid}]",
                     "type=endpoint",
                     "context=ai-agent-provider-inbound",
@@ -131,6 +171,7 @@ def render_pjsip(
                     "rtp_symmetric=yes",
                     "force_rport=yes",
                     "rewrite_contact=yes",
+                    f"aors={sid}-aor" if server_uri else "",
                     "",
                     f"[{sid}-identify]",
                     "type=identify",
@@ -293,9 +334,70 @@ def render_dialplan(
             " same => n,Return()",
         ]
     )
-    active_extensions = {
-        key: value for key, value in (extensions or {}).items() if value.enabled
-    }
+    lines.extend(
+        [
+            "",
+            "[ai-agent-outbound-ai]",
+            "exten => s,1,NoOp(Outbound AI campaign ${AI_CAMPAIGN_ID})",
+            " same => n,Set(__TRANSFER_CONTEXT=ai-agent-transfer-inbound)",
+        ]
+    )
+    if settings.enable_recording:
+        lines.extend(
+            [
+                f" same => n,Set(AST_RECORDING_FILE={settings.recording_directory}/"
+                "${AI_ATTEMPT_ID}.wav)",
+                " same => n,MixMonitor(${AST_RECORDING_FILE},b,i(AST_MIXMONITOR_ID),"
+                f"{settings.recording_uploader} ${{AST_RECORDING_FILE}} ${{AI_ATTEMPT_ID}})",
+            ]
+        )
+    lines.extend(
+        [
+            " same => n,Dial(PJSIP/${AI_CALLER_ID}@ai-livekit,60,"
+            "b(ai-agent-add-outbound-headers^s^1))",
+        ]
+    )
+    if settings.enable_recording:
+        lines.append(" same => n,StopMixMonitor(${AST_MIXMONITOR_ID})")
+    lines.extend(
+        [
+            " same => n,Hangup()",
+            "",
+            "[ai-agent-add-outbound-headers]",
+            "exten => s,1,Set(PJSIP_HEADER(add,X-Outbound-Call)=true)",
+            " same => n,Set(PJSIP_HEADER(add,X-Asterisk-LinkedID)=${AI_ATTEMPT_ID})",
+            " same => n,Set(PJSIP_HEADER(add,X-Company-ID)=${AI_COMPANY_ID})",
+            " same => n,Set(PJSIP_HEADER(add,X-Agent-ID)=${AI_AGENT_ID})",
+            " same => n,Set(PJSIP_HEADER(add,X-Campaign-ID)=${AI_CAMPAIGN_ID})",
+            " same => n,Set(PJSIP_HEADER(add,X-Recipient-ID)=${AI_RECIPIENT_ID})",
+            " same => n,Set(PJSIP_HEADER(add,X-Call-ID)=${AI_CALL_ID})",
+            " same => n,Set(PJSIP_HEADER(add,X-Attempt-ID)=${AI_ATTEMPT_ID})",
+            " same => n,Set(PJSIP_HEADER(add,X-Destination-Number)=${AI_DESTINATION})",
+            " same => n,Return()",
+            "",
+            "[ai-agent-outbound-broadcast]",
+            "exten => s,1,NoOp(Outbound broadcast campaign ${AI_CAMPAIGN_ID})",
+            " same => n,Playback(ai-agent-generated/${AI_MEDIA_ID})",
+            " same => n,Hangup()",
+            "",
+            "[ai-agent-outbound-keypad]",
+            "exten => s,1,NoOp(Outbound keypad campaign ${AI_CAMPAIGN_ID})",
+            " same => n,Playback(ai-agent-generated/${AI_MEDIA_ID})",
+            " same => n,Read(AI_DIGIT,beep,1,,1,10)",
+            ' same => n,Set(AI_KEY_NAME=${IF($["${AI_DIGIT}"="*"]?STAR:'
+            '${IF($["${AI_DIGIT}"="#"]?HASH:${AI_DIGIT})})})',
+            " same => n,Set(AI_ACTION=${AI_KEY_${AI_KEY_NAME}})",
+            ' same => n,GotoIf($["${AI_ACTION}"="repeat"]?s,1)',
+            ' same => n,GotoIf($["${AI_ACTION}"="ai"]?ai,1)',
+            ' same => n,GotoIf($["${AI_ACTION}"="opt_out"]?optout,1)',
+            ' same => n,GotoIf($["${AI_ACTION:0:1}"="x"]?ai-agent-transfer-inbound,${AI_ACTION},1)',
+            " same => n,Hangup()",
+            " same => n(ai),Goto(ai-agent-outbound-ai,s,1)",
+            " same => n(optout),UserEvent(AIOutboundOptOut,AttemptID: ${AI_ATTEMPT_ID})",
+            " same => n,Hangup()",
+        ]
+    )
+    active_extensions = {key: value for key, value in (extensions or {}).items() if value.enabled}
     lines.extend(["", "[ai-agent-transfer-inbound]"])
     for _extension_id, spec in sorted(active_extensions.items()):
         route = extension_route(spec.company_id, spec.extension)

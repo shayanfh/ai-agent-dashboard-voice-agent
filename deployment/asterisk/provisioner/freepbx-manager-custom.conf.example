@@ -4,6 +4,6 @@
 secret=CHANGE_AMI_SECRET
 deny=0.0.0.0/0.0.0.0
 permit=127.0.0.1/255.255.255.255
-read=system,command
-write=system,command
+read=system,call,reporting,cdr,dialplan
+write=system,command,originate
 writetimeout=5000

@@ -105,6 +105,20 @@ class DashboardBackendClient:
         self._ensure_success(response)
         return ResolvedAgent.model_validate(response.json())
 
+    async def resolve_agent_by_id(
+        self, *, agent_id: str, company_id: str, call_id: str, correlation_id: str
+    ) -> ResolvedAgent:
+        response = await self._request(
+            "GET",
+            "/api/v1/internal/voice/resolve-agent-by-id",
+            params={"agent_id": agent_id, "company_id": company_id, "call_id": call_id},
+            correlation_id=correlation_id,
+        )
+        if response.status_code == 404:
+            raise AgentNotFound("Outbound campaign agent was not found")
+        self._ensure_success(response)
+        return ResolvedAgent.model_validate(response.json())
+
     async def get_knowledge_snapshot(
         self, *, agent_id: str, correlation_id: str
     ) -> KnowledgeSnapshot:

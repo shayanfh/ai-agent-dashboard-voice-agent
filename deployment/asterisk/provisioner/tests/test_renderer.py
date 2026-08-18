@@ -106,3 +106,27 @@ def test_twilio_requires_admin_managed_source_cidrs() -> None:
         assert "TWILIO_SIGNALING_CIDRS" in str(exc)
     else:
         raise AssertionError("Twilio without signaling CIDRs must be rejected")
+
+
+def test_outbound_dialplan_and_twilio_termination_are_rendered() -> None:
+    connection_id = str(uuid.uuid4())
+    twilio = spec(
+        provider="twilio",
+        mode="twilio",
+        allowed_addresses=[],
+        server_uri="sip:mw-test.pstn.twilio.com",
+        auth_username="mw-test",
+        auth_password="generated-secret",
+        transport="tls",
+    )
+    config = settings(twilio_signaling_cidrs="54.172.60.0/30")
+
+    pjsip = render_pjsip({connection_id: twilio}, config)
+    dialplan = render_dialplan({connection_id: twilio}, config)
+
+    assert "contact=sip:mw-test.pstn.twilio.com" in pjsip
+    assert "outbound_auth=" in pjsip
+    assert "[ai-agent-outbound-ai]" in dialplan
+    assert "[ai-agent-outbound-broadcast]" in dialplan
+    assert "[ai-agent-outbound-keypad]" in dialplan
+    assert "UserEvent(AIOutboundOptOut" in dialplan

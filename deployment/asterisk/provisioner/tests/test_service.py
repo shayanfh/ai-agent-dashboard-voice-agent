@@ -3,7 +3,7 @@ import uuid
 
 import pytest
 from app.config import Settings
-from app.models import ConnectionSpec, ExtensionSpec
+from app.models import ConnectionSpec, ExtensionSpec, OutboundCallSpec
 from app.service import ProvisioningService
 
 
@@ -16,6 +16,9 @@ class FakeAmi:
 
     async def command(self, command: str) -> str:
         return "Registration/Server  Auth  Status\nprovider.test  Registered"
+
+    async def originate(self, **kwargs) -> None:
+        self.originate_kwargs = kwargs
 
 
 class FailingAmi(FakeAmi):
@@ -136,8 +139,64 @@ async def test_extension_upsert_and_delete_share_atomic_state(tmp_path) -> None:
 
     assert response.resource_id == f"ext-{extension_id}"
     assert "username=company-a-200" in (tmp_path / "pjsip.conf").read_text()
-    assert json.loads((tmp_path / "state.json").read_text())["extensions"][
-        extension_id
-    ]["extension"] == "200"
+    assert (
+        json.loads((tmp_path / "state.json").read_text())["extensions"][extension_id]["extension"]
+        == "200"
+    )
     assert await service.delete_extension(extension_id) is True
     assert service.ami.reload_count == 2
+
+
+@pytest.mark.asyncio
+async def test_outbound_call_uses_tenant_connection_and_safe_context(tmp_path) -> None:
+    config = Settings(
+        _env_file=None,
+        provisioner_api_key="test-key",
+        public_sip_uri="sip:asterisk.test:5061;transport=tls",
+        livekit_sip_uri="sip:livekit.test:5061;transport=tls",
+        ami_username="provisioner",
+        ami_password="secret",
+        state_file=str(tmp_path / "state.json"),
+        generated_pjsip_file=str(tmp_path / "pjsip.conf"),
+        generated_dialplan_file=str(tmp_path / "extensions.conf"),
+        enable_recording=False,
+    )
+    service = ProvisioningService(config)
+    service.ami = FakeAmi()
+    connection_id = uuid.uuid4()
+    company_id = uuid.uuid4()
+    await service.upsert(
+        str(connection_id),
+        ConnectionSpec(
+            company_id=company_id,
+            name="Outbound registration",
+            provider="generic_sip",
+            mode="registration",
+            phone_number="+19714361744",
+            server_uri="provider.test",
+            auth_username="customer-1",
+            auth_password="provider-secret",
+            public_sip_uri=config.public_sip_uri,
+        ),
+    )
+    attempt_id = uuid.uuid4()
+    response = await service.originate(
+        OutboundCallSpec(
+            attempt_id=attempt_id,
+            connection_id=connection_id,
+            campaign_type="voice_broadcast_keypad",
+            destination_number="+14155550100",
+            caller_id="+19714361744",
+            media_id="a" * 64,
+            company_id=company_id,
+            campaign_id=uuid.uuid4(),
+            recipient_id=uuid.uuid4(),
+            call_id=uuid.uuid4(),
+            keypad_actions={"1": "opt_out", "2": "extension:100"},
+        )
+    )
+
+    assert response.accepted is True
+    assert service.ami.originate_kwargs["context"] == "ai-agent-outbound-keypad"
+    assert service.ami.originate_kwargs["variables"]["AI_KEY_1"] == "opt_out"
+    assert service.ami.originate_kwargs["variables"]["AI_KEY_2"].endswith("e100")
