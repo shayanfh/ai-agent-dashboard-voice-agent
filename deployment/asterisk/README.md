@@ -397,6 +397,8 @@ AI campaigns call the recipient through the selected customer endpoint and execu
 `MixMonitor`, and bridges the answered channel to LiveKit. Broadcast campaigns execute
 `Playback(ai-agent-generated/<hash>)` without LiveKit. Keypad campaigns can repeat, bridge to AI,
 transfer to a generated tenant extension route, hang up, or emit an opt-out event.
+Uploaded broadcast files are accepted only when they are uncompressed PCM16 mono WAV at 8 kHz;
+the Backend performs this normalization before sending media to the provisioner.
 
 The AMI event monitor posts lifecycle updates to `BACKEND_OUTBOUND_CALLBACK_URL`. Keep this URL
 reachable from the FreePBX server over HTTPS or a private network. If it is missing, calls can be

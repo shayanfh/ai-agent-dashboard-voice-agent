@@ -1,8 +1,10 @@
 import asyncio
+import io
 import logging
 import os
 import secrets
 import uuid
+import wave
 from pathlib import Path
 from typing import Annotated
 
@@ -145,6 +147,21 @@ async def upload_outbound_media(
         raise HTTPException(status_code=413, detail="Outbound media is empty or too large")
     if not content.startswith(b"RIFF") or b"WAVE" not in content[:16]:
         raise HTTPException(status_code=422, detail="Outbound media must be a WAV file")
+    try:
+        with wave.open(io.BytesIO(content), "rb") as wav_file:
+            compatible = (
+                wav_file.getcomptype() == "NONE"
+                and wav_file.getnchannels() == 1
+                and wav_file.getsampwidth() == 2
+                and wav_file.getframerate() == 8000
+            )
+    except (EOFError, wave.Error) as exc:
+        raise HTTPException(status_code=422, detail="Outbound media is not a valid WAV") from exc
+    if not compatible:
+        raise HTTPException(
+            status_code=422,
+            detail="Outbound media must be PCM16 mono WAV at 8000 Hz",
+        )
     await asyncio.to_thread(_write_outbound_media, media_id, content)
     return {"media_id": media_id, "path": f"ai-agent-generated/{media_id}"}
 
