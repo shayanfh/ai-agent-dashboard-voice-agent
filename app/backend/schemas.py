@@ -12,7 +12,6 @@ class ResolvedAgent(BaseModel):
     language: str = "en"
     greeting_message: str | None = None
     system_prompt: str | None = None
-    transfer_number: str | None = None
     use_realtime: bool = False
     realtime_provider: str | None = None
     realtime_model: str | None = None
