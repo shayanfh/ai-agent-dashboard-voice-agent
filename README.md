@@ -20,6 +20,29 @@ the SIP participant. When Asterisk recording is enabled it also extracts the for
 `X-Asterisk-LinkedID`. It resolves the agent, creates the call, builds tenant-scoped STT/LLM/TTS
 objects, greets immediately, persists committed conversation items, and completes the call.
 
+### Hybrid Realtime agents
+
+When `use_realtime=true`, caller audio is sent directly to the fixed OpenAI `gpt-realtime` model,
+configured with `modalities=["text"]`. The returned text is streamed through ElevenLabs TTS using
+the customer's selected `voice_id`. The customer cannot select the Realtime or TTS model; these
+are server-owned settings. Pipeline agents continue to use separate STT, LLM, and TTS providers.
+
+The default Realtime TTS model is `eleven_flash_v2_5`, selected for low conversational latency.
+Set both provider credentials on the Voice Agent server:
+
+```dotenv
+OPENAI_API_KEY=...
+ELEVENLABS_API_KEY=...
+REALTIME_MODEL=gpt-realtime
+REALTIME_INPUT_TRANSCRIPTION_MODEL=gpt-4o-mini-transcribe
+REALTIME_TTS_MODEL=eleven_flash_v2_5
+REALTIME_TTS_VOICE=JBFqnCBsd6RMkjVDRZzb
+```
+
+`REALTIME_TTS_VOICE` is the fallback only. For each Realtime agent, the Dashboard's `voice_id`
+field should contain an ElevenLabs voice ID copied from that account's Voice Library. Restart the
+Voice Agent after changing server-owned model settings or credentials.
+
 ## Setup
 
 Python 3.12 and a LiveKit deployment with SIP are required.

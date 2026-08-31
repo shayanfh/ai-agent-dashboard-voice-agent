@@ -10,6 +10,7 @@ dependencies = [
   "httpx>=0.28,<1",
   "livekit-agents[openai,silero]>=1.6,<2",
   "livekit-plugins-deepgram>=1.2,<2",
+  "livekit-plugins-elevenlabs>=1.2,<2",
   "pydantic>=2.10,<3",
   "pydantic-settings>=2.7,<3",
   "python-dotenv>=1.0,<2",

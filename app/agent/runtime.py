@@ -15,7 +15,14 @@ from app.backend.client import DashboardBackendClient
 from app.backend.schemas import CallCreate, KnowledgeSnapshot
 from app.core.config import Settings
 from app.core.exceptions import CallerNotFoundError
-from app.providers.factories import create_llm, create_stt, create_tts, create_vad
+from app.providers.factories import (
+    create_llm,
+    create_realtime_llm,
+    create_realtime_tts,
+    create_stt,
+    create_tts,
+    create_vad,
+)
 from app.services.call_service import CallLifecycleService
 from app.services.knowledge_service import KnowledgeIndex, knowledge_cache
 from app.services.summary_service import OpenAICallAnalyzer
@@ -251,12 +258,18 @@ async def run_inbound_call(ctx: agents.JobContext, settings: Settings) -> None:
                 extension=resolved_target.extension,
             )
             return f"The caller was transferred to extension {resolved_target.extension}."
-        session: AgentSession[None] = AgentSession(
-            vad=create_vad(),
-            stt=create_stt(config, settings),
-            llm=create_llm(config, settings),
-            tts=create_tts(config, settings),
-        )
+        if config.use_realtime:
+            session: AgentSession[None] = AgentSession(
+                llm=create_realtime_llm(config, settings),
+                tts=create_realtime_tts(config, settings),
+            )
+        else:
+            session = AgentSession(
+                vad=create_vad(),
+                stt=create_stt(config, settings),
+                llm=create_llm(config, settings),
+                tts=create_tts(config, settings),
+            )
         transcripts = TranscriptService(backend, call_context)
         lifecycle = CallLifecycleService(
             backend,

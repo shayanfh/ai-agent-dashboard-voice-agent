@@ -26,6 +26,10 @@ class Settings(BaseSettings):
     default_tts_provider: str = "openai"
     default_tts_model: str = "gpt-4o-mini-tts"
     default_tts_voice: str = "alloy"
+    realtime_model: str = "gpt-realtime"
+    realtime_input_transcription_model: str = "gpt-4o-mini-transcribe"
+    realtime_tts_model: str = "eleven_flash_v2_5"
+    realtime_tts_voice: str = "JBFqnCBsd6RMkjVDRZzb"
     openai_api_key: SecretStr | None = None
     deepgram_api_key: SecretStr | None = None
     elevenlabs_api_key: SecretStr | None = None
@@ -56,6 +60,8 @@ class Settings(BaseSettings):
             raise ValueError("OPENAI_API_KEY is required for the configured provider pipeline")
         if "deepgram" in providers and not self.deepgram_api_key:
             raise ValueError("DEEPGRAM_API_KEY is required when Deepgram STT is configured")
+        if not self.elevenlabs_api_key:
+            raise ValueError("ELEVENLABS_API_KEY is required for Realtime agent speech")
         return self
 
 

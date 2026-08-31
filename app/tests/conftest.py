@@ -13,6 +13,6 @@ def settings() -> Settings:
         dashboard_backend_url="http://backend.test",
         dashboard_internal_api_key="internal-secret",
         openai_api_key="provider-secret",
+        elevenlabs_api_key="elevenlabs-secret",
         http_max_retries=1,
     )
-
