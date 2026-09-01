@@ -1,6 +1,7 @@
 import asyncio
 import json
 from dataclasses import replace
+from typing import cast
 from uuid import uuid4
 
 import structlog
@@ -27,7 +28,12 @@ from app.services.call_service import CallLifecycleService
 from app.services.knowledge_service import KnowledgeIndex, knowledge_cache
 from app.services.summary_service import OpenAICallAnalyzer
 from app.services.transcript_service import TranscriptService
-from app.telephony.attributes import extract_sip_call_info, parse_remote_sip_headers
+from app.telephony.attributes import (
+    SipCallInfo,
+    extract_sip_call_info,
+    parse_metadata,
+    parse_remote_sip_headers,
+)
 
 logger = structlog.get_logger()
 
@@ -49,16 +55,55 @@ async def wait_for_sip_participant(
     return participant
 
 
+async def wait_for_web_participant(
+    ctx: agents.JobContext, participant_identity: str, wait_seconds: float
+) -> rtc.RemoteParticipant:
+    try:
+        participant = await asyncio.wait_for(
+            agents.utils.wait_for_participant(ctx.room, identity=participant_identity),
+            timeout=wait_seconds,
+        )
+    except TimeoutError as exc:
+        raise CallerNotFoundError("Browser test participant did not join before timeout") from exc
+    if not isinstance(participant, rtc.RemoteParticipant):
+        raise CallerNotFoundError("Matched browser participant is not remote")
+    return participant
+
+
 async def run_inbound_call(ctx: agents.JobContext, settings: Settings) -> None:
     correlation_id = str(uuid4())
+    job_metadata = parse_metadata(ctx.job.metadata)
+    web_test = job_metadata.get("call_type") == "web_test"
     await ctx.connect()
-    participant = await wait_for_sip_participant(ctx, settings.caller_wait_timeout_seconds)
-    sip = extract_sip_call_info(
-        participant, room_name=ctx.room.name, job_metadata=ctx.job.metadata
-    )
+    if web_test:
+        participant_identity = str(job_metadata.get("participant_identity") or "")
+        if not participant_identity:
+            raise CallerNotFoundError("Browser test participant identity is missing")
+        participant = await wait_for_web_participant(
+            ctx, participant_identity, settings.caller_wait_timeout_seconds
+        )
+        sip = SipCallInfo(
+            caller_number=None,
+            called_number=None,
+            sip_trunk_id=None,
+            sip_call_id=None,
+            sip_call_id_full=None,
+            sip_rule_id=None,
+            participant_identity=participant.identity,
+            participant_name=participant.name,
+            destination_extension=None,
+            asterisk_linked_id=None,
+            room_name=ctx.room.name,
+            dispatch_metadata=job_metadata,
+        )
+    else:
+        participant = await wait_for_sip_participant(ctx, settings.caller_wait_timeout_seconds)
+        sip = extract_sip_call_info(
+            participant, room_name=ctx.room.name, job_metadata=ctx.job.metadata
+        )
     # Outbound routing data arrives as signed/internal X-* SIP headers and must
     # be read synchronously; trunk attribute mappings are updated asynchronously.
-    if isinstance(participant, rtc.RemoteParticipant):
+    if not web_test and isinstance(participant, rtc.RemoteParticipant):
         try:
             response = await asyncio.wait_for(
                 ctx.room.local_participant.perform_rpc(
@@ -121,22 +166,32 @@ async def run_inbound_call(ctx: agents.JobContext, settings: Settings) -> None:
         sip_trunk_id=sip.sip_trunk_id,
         participant_identity=sip.participant_identity,
     )
-    if not sip.routing_number and not sip.outbound:
+    if not web_test and not sip.routing_number and not sip.outbound:
         raise CallerNotFoundError("Called number/extension is missing from SIP attributes")
 
     async with DashboardBackendClient(settings) as backend:
-        if sip.outbound:
+        if web_test:
+            required = ("call_id", "company_id", "agent_id")
+            if not all(job_metadata.get(key) for key in required):
+                raise CallerNotFoundError("Browser test routing metadata is incomplete")
+            config = await backend.resolve_agent_by_id(
+                agent_id=str(job_metadata["agent_id"]),
+                company_id=str(job_metadata["company_id"]),
+                call_id=str(job_metadata["call_id"]),
+                correlation_id=correlation_id,
+            )
+        elif sip.outbound:
             if not all((sip.outbound_company_id, sip.outbound_agent_id, sip.outbound_call_id)):
                 raise CallerNotFoundError("Outbound routing headers are incomplete")
             config = await backend.resolve_agent_by_id(
-                agent_id=sip.outbound_agent_id,
-                company_id=sip.outbound_company_id,
-                call_id=sip.outbound_call_id,
+                agent_id=cast(str, sip.outbound_agent_id),
+                company_id=cast(str, sip.outbound_company_id),
+                call_id=cast(str, sip.outbound_call_id),
                 correlation_id=correlation_id,
             )
         else:
             config = await backend.resolve_agent(
-                phone_number=sip.called_number or sip.routing_number,
+                phone_number=cast(str, sip.called_number or sip.routing_number),
                 correlation_id=correlation_id,
             )
         knowledge_task = asyncio.create_task(
@@ -150,8 +205,11 @@ async def run_inbound_call(ctx: agents.JobContext, settings: Settings) -> None:
                 ),
             )
         )
-        if sip.outbound:
-            call_id = sip.outbound_call_id
+        if web_test:
+            call_id = str(job_metadata["call_id"])
+            created_company_id = config.company_id
+        elif sip.outbound:
+            call_id = cast(str, sip.outbound_call_id)
             created_company_id = config.company_id
         else:
             created = await backend.create_call(
@@ -198,7 +256,7 @@ async def run_inbound_call(ctx: agents.JobContext, settings: Settings) -> None:
             agent_configuration=config,
         )
         log = logger.bind(
-            call_id=created.call_id,
+            call_id=call_id,
             company_id=config.company_id,
             agent_id=config.agent_id,
             room_name=sip.room_name,
@@ -293,8 +351,8 @@ async def run_inbound_call(ctx: agents.JobContext, settings: Settings) -> None:
         await session.start(
             room=ctx.room,
             agent=KnowledgeAgent(
-                instructions=compose_instructions(config),
-                tools=[end_call_tool, transfer_to_extension],
+                instructions=compose_instructions(config, allow_transfer=not web_test),
+                tools=[end_call_tool] if web_test else [end_call_tool, transfer_to_extension],
                 knowledge=knowledge,
                 retrieval_top_k=settings.knowledge_retrieval_top_k,
                 retrieval_max_chars=settings.knowledge_retrieval_max_chars,
@@ -326,8 +384,13 @@ async def run_inbound_call(ctx: agents.JobContext, settings: Settings) -> None:
             )
         log.info("call_session_started")
         reason = "caller_disconnected"
+        max_duration_seconds = (
+            settings.web_test_call_max_duration_seconds
+            if web_test
+            else settings.call_max_duration_seconds
+        )
         try:
-            await asyncio.wait_for(closed.wait(), timeout=settings.call_max_duration_seconds)
+            await asyncio.wait_for(closed.wait(), timeout=max_duration_seconds)
         except TimeoutError:
             reason = "maximum_duration_reached"
             await session.aclose()

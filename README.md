@@ -12,6 +12,9 @@ Inbound: Caller → provider → central FreePBX → LiveKit SIP → isolated ro
 
 Outbound AI: Backend/Celery → FreePBX AMI → provider → recipient → LiveKit SIP → this worker.
 
+Browser test: Dashboard browser → LiveKit WebRTC room → this worker. This path does not use
+FreePBX, SIP, or a customer phone number.
+
 Voice Broadcast: Backend/Celery → FreePBX AMI → provider → recipient → cached WAV playback. The
 broadcast-only path does not create a LiveKit room or consume Voice Agent/LLM resources.
 
@@ -42,6 +45,26 @@ REALTIME_TTS_VOICE=JBFqnCBsd6RMkjVDRZzb
 `REALTIME_TTS_VOICE` is the fallback only. For each Realtime agent, the Dashboard's `voice_id`
 field should contain an ElevenLabs voice ID copied from that account's Voice Library. Restart the
 Voice Agent after changing server-owned model settings or credentials.
+
+### Browser test calls
+
+The Backend creates a tenant-scoped Call and returns a short-lived LiveKit room token containing
+an explicit dispatch for this worker. Dispatch metadata contains the verified Call, Company,
+Agent, and browser participant identities. The worker resolves that existing Call through
+`resolve-agent-by-id`, loads the same Agent configuration and cached Knowledge Base as a real call,
+and persists transcript, summary, outcome, extracted data, and duration normally.
+
+Test mode never exposes `transfer_to_extension` to the LLM and uses test-specific instructions
+when a tester asks to transfer. It also enforces a hard session timeout independently of the
+frontend countdown:
+
+```dotenv
+WEB_TEST_CALL_MAX_DURATION_SECONDS=600
+```
+
+Keep this value equal to the Backend's `WEB_TEST_CALL_MAX_DURATION_SECONDS`. The Backend caps the
+persisted test duration to the same value as a second enforcement layer. The token permits the
+browser participant to publish only microphone audio and subscribe to the Agent audio.
 
 ## Setup
 

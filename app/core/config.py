@@ -40,6 +40,7 @@ class Settings(BaseSettings):
     http_timeout_seconds: float = Field(default=10, gt=0)
     http_max_retries: int = Field(default=3, ge=0, le=10)
     call_max_duration_seconds: int = Field(default=1800, ge=30)
+    web_test_call_max_duration_seconds: int = Field(default=600, ge=60, le=600)
     caller_wait_timeout_seconds: int = Field(default=30, ge=5)
     enable_call_recording: bool = False
     asterisk_linked_id_wait_seconds: float = Field(default=2.0, ge=0, le=10)

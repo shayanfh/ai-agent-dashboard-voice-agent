@@ -115,7 +115,7 @@ class DashboardBackendClient:
             correlation_id=correlation_id,
         )
         if response.status_code == 404:
-            raise AgentNotFound("Outbound campaign agent was not found")
+            raise AgentNotFound("Call agent context was not found")
         self._ensure_success(response)
         return ResolvedAgent.model_validate(response.json())
 

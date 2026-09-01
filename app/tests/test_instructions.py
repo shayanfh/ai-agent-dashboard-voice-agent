@@ -26,3 +26,14 @@ def test_default_instructions_require_clarification_instead_of_guessing() -> Non
     assert "display name stated by the caller" in instructions
     assert "Never use an employee name" in instructions
     assert "Do not use it for silence" in instructions
+
+
+def test_browser_test_instructions_disable_transfer() -> None:
+    instructions = compose_instructions(
+        ResolvedAgent(company_id="company", agent_id="agent", agent_name="Agent"),
+        allow_transfer=False,
+    )
+
+    assert "transfer_to_extension" not in instructions
+    assert "browser test call" in instructions
+    assert "transfers can only be tested on a real SIP" in instructions
