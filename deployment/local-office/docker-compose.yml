@@ -79,6 +79,8 @@ services:
       - "${SERVER_IP}:8000:8000"
     volumes:
       - ./provision_livekit.py:/opt/mozaic/provision_livekit.py:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       postgres:
         condition: service_healthy
@@ -147,10 +149,8 @@ services:
   livekit-sip:
     image: livekit/sip:latest
     network_mode: host
-    environment:
-      SIP_CONFIG_FILE: /etc/livekit/sip.yaml
     volumes:
-      - ./sip.yaml:/etc/livekit/sip.yaml:ro
+      - ./sip.yaml:/sip/config.yaml:ro
     depends_on:
       - redis-livekit
       - livekit

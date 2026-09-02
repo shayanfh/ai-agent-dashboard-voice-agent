@@ -21,7 +21,7 @@ health() {
   curl -fsS "http://${SERVER_IP}:8000/health" >/dev/null \
     && echo "OK   backend" || { echo "FAIL backend"; failed=1; }
   curl -fsS -H "X-Provisioner-API-Key: ${PROVISIONER_API_KEY}" \
-    "http://${SERVER_IP}:9443/health" >/dev/null \
+    "http://127.0.0.1:9443/health" >/dev/null \
     && echo "OK   provisioner" || { echo "FAIL provisioner"; failed=1; }
   timeout 2 bash -c "</dev/tcp/${SERVER_IP}/7880" 2>/dev/null \
     && echo "OK   livekit" || { echo "FAIL livekit"; failed=1; }

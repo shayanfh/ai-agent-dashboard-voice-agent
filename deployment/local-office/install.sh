@@ -131,6 +131,8 @@ load_or_collect_configuration() {
 }
 
 save_configuration() {
+  local previous_umask
+  previous_umask=$(umask)
   install -d -o root -g root -m 0700 "$CONFIG_ROOT"
   umask 077
   {
@@ -154,6 +156,7 @@ save_configuration() {
     printf 'AMI_PASSWORD=%q\n' "$AMI_PASSWORD"
   } > "$STATE_FILE"
   chmod 0600 "$STATE_FILE"
+  umask "$previous_umask"
 }
 
 install_packages() {
@@ -214,6 +217,7 @@ fetch_sources() {
   sync_repo "$FRONTEND_REPO" "$INSTALL_ROOT/frontend"
   sync_repo "$BACKEND_REPO" "$INSTALL_ROOT/backend"
   sync_repo "$VOICE_AGENT_REPO" "$INSTALL_ROOT/voice-agent"
+  chmod -R a+rX "$INSTALL_ROOT/frontend" "$INSTALL_ROOT/backend" "$INSTALL_ROOT/voice-agent"
   install -d -o root -g root -m 0750 "$RUNTIME_DIR"
   install -o root -g root -m 0644 "$SCRIPT_DIR/docker-compose.yml" "$RUNTIME_DIR/docker-compose.yml"
   install -o root -g root -m 0644 "$SCRIPT_DIR/provision_livekit.py" "$RUNTIME_DIR/provision_livekit.py"
@@ -312,6 +316,8 @@ EOF
 }
 
 write_runtime_configuration() {
+  local previous_umask
+  previous_umask=$(umask)
   log "Writing Docker and application configuration"
   umask 077
   cat > "$RUNTIME_DIR/.env" <<EOF
@@ -352,7 +358,7 @@ LIVEKIT_API_KEY=${LIVEKIT_API_KEY}
 LIVEKIT_API_SECRET=${LIVEKIT_API_SECRET}
 LIVEKIT_SIP_ENDPOINT=${SERVER_IP}:5062
 LIVEKIT_AGENT_NAME=ai-agent-dashboard-inbound
-ASTERISK_PROVISIONER_URL=http://${SERVER_IP}:9443
+ASTERISK_PROVISIONER_URL=http://host.docker.internal:9443
 ASTERISK_PROVISIONER_API_KEY=${PROVISIONER_API_KEY}
 ASTERISK_PUBLIC_SIP_URI=sip:${SERVER_IP}:5060;transport=udp
 EOF
@@ -450,6 +456,7 @@ EOF
   chmod 0600 "$RUNTIME_DIR"/.env "$RUNTIME_DIR"/*.env "$RUNTIME_DIR"/*.yaml
   chmod 0644 "$RUNTIME_DIR/redis-livekit.conf" "$RUNTIME_DIR/docker-compose.yml" \
     "$RUNTIME_DIR/provision_livekit.py"
+  umask "$previous_umask"
 }
 
 configure_firewall() {
@@ -465,6 +472,8 @@ configure_firewall() {
   ufw allow from "$LAN_CIDR" to "$SERVER_IP" port 7881 proto tcp comment 'LiveKit RTC TCP'
   ufw allow from "$LAN_CIDR" to "$SERVER_IP" port 7882 proto udp comment 'LiveKit RTC UDP'
   ufw allow from "$LAN_CIDR" to "$SERVER_IP" port 9000 proto tcp comment 'Mozaic recordings'
+  ufw allow from "$LAN_CIDR" to "$SERVER_IP" port 9443 proto tcp comment 'Asterisk provisioner health'
+  ufw allow from 172.16.0.0/12 to any port 9443 proto tcp comment 'Backend to provisioner'
   ufw allow from "$NEWROCK_IP" to "$SERVER_IP" port 5060 proto udp comment 'New Rock SIP'
   ufw allow from "$NEWROCK_IP" to "$SERVER_IP" port 10000:19999 proto udp comment 'New Rock RTP'
 }
@@ -483,7 +492,7 @@ wait_http() {
     fi
     sleep 2
   done
-  die "$name did not become healthy: $url"
+  return 1
 }
 
 wait_tcp() {
@@ -494,7 +503,7 @@ wait_tcp() {
     fi
     sleep 2
   done
-  die "$name did not open ${host}:${port}"
+  return 1
 }
 
 start_stack() {
@@ -502,13 +511,20 @@ start_stack() {
   cd "$RUNTIME_DIR"
   compose pull postgres redis-dashboard redis-livekit minio livekit livekit-sip
   compose up -d postgres redis-dashboard redis-livekit minio minio-init livekit livekit-sip
-  wait_tcp "LiveKit" "$SERVER_IP" 7880
+  wait_tcp "LiveKit" "$SERVER_IP" 7880 || die "LiveKit did not open ${SERVER_IP}:7880"
   compose up -d --build api
-  wait_http "Dashboard backend" "http://${SERVER_IP}:8000/health"
+  wait_http "Dashboard backend" "http://${SERVER_IP}:8000/health" || \
+    die "Dashboard backend did not become healthy: http://${SERVER_IP}:8000/health"
   compose run --rm api alembic upgrade head
   compose up -d --build celery-worker celery-beat frontend asterisk-provisioner voice-agent
-  wait_http "Asterisk provisioner" "http://${SERVER_IP}:9443/health" \
-    "X-Provisioner-API-Key: ${PROVISIONER_API_KEY}"
+  if ! wait_http "Asterisk provisioner" "http://127.0.0.1:9443/health" \
+    "X-Provisioner-API-Key: ${PROVISIONER_API_KEY}"; then
+    compose ps asterisk-provisioner || true
+    compose logs --tail=150 asterisk-provisioner || true
+    ss -ltnp | grep -E ':(5038|9443)[[:space:]]' || true
+    asterisk -rx 'manager show user ai-provisioner' || true
+    die "Asterisk provisioner did not become healthy on 127.0.0.1:9443"
+  fi
 
   log "Creating the central LiveKit SIP trunk and dispatch rule"
   compose exec -T \
@@ -565,7 +581,7 @@ final_checks() {
   asterisk -rx 'pjsip show endpoint ai-livekit' || true
   curl --silent --fail "http://${SERVER_IP}:8000/health" | jq .
   curl --silent --fail -H "X-Provisioner-API-Key: ${PROVISIONER_API_KEY}" \
-    "http://${SERVER_IP}:9443/health" | jq .
+    "http://127.0.0.1:9443/health" | jq .
   log "Installation completed"
   printf '\nDashboard: http://%s:3000\n' "$SERVER_IP"
   printf 'Backend:   http://%s:8000/docs\n' "$SERVER_IP"
