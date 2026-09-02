@@ -11,8 +11,26 @@ STATE_FILE="$CONFIG_ROOT/install.env"
 # shellcheck disable=SC1090
 source "$STATE_FILE"
 
+# Older installations do not yet have these values in install.env.
+BOOTSTRAP_ADMIN_EMAIL=${BOOTSTRAP_ADMIN_EMAIL:-login@starvox.ai}
+BOOTSTRAP_ADMIN_PASSWORD=${BOOTSTRAP_ADMIN_PASSWORD:-admin@mozaic}
+BOOTSTRAP_COMPANY_NAME=${BOOTSTRAP_COMPANY_NAME:-Starvox Office}
+
 compose() {
   docker compose --env-file "$RUNTIME_DIR/.env" -f "$RUNTIME_DIR/docker-compose.yml" "$@"
+}
+
+bootstrap_admin() {
+  local script="$INSTALL_ROOT/voice-agent/deployment/local-office/bootstrap_admin.py"
+  [[ -r $script ]] || { echo "Missing $script; update the voice-agent repository." >&2; return 1; }
+  export BOOTSTRAP_ADMIN_EMAIL BOOTSTRAP_ADMIN_PASSWORD BOOTSTRAP_COMPANY_NAME
+  export BOOTSTRAP_TIMEZONE="$TIMEZONE"
+  compose exec -T \
+    -e BOOTSTRAP_ADMIN_EMAIL \
+    -e BOOTSTRAP_ADMIN_PASSWORD \
+    -e BOOTSTRAP_COMPANY_NAME \
+    -e BOOTSTRAP_TIMEZONE \
+    api python - < "$script"
 }
 
 health() {
@@ -49,6 +67,7 @@ update() {
   compose build api celery-worker celery-beat frontend asterisk-provisioner voice-agent
   compose run --rm api alembic upgrade head
   compose up -d
+  bootstrap_admin
   systemctl restart asterisk
   health
 }
@@ -65,9 +84,10 @@ case ${1:-status} in
     compose restart
     health
     ;;
+  bootstrap-admin) bootstrap_admin ;;
   update) update ;;
   *)
-    echo "Usage: mozaic-office {status|health|logs [lines]|restart|update}" >&2
+    echo "Usage: mozaic-office {status|health|logs [lines]|restart|bootstrap-admin|update}" >&2
     exit 2
     ;;
 esac

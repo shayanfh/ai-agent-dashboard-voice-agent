@@ -42,6 +42,17 @@ summary and requires confirmation before installing packages or changing Asteris
 The installer backs up the original Asterisk `pjsip.conf`, `extensions.conf`, and `manager.conf`,
 then adds isolated include files. It does not delete existing Docker volumes or Asterisk data.
 
+After the database migration it creates an active local company administrator and an unlimited
+local subscription. The operation is idempotent and never resets the password of an existing
+account:
+
+- Email: `login@starvox.ai`
+- Password: `admin@mozaic`
+
+Change this initial password after the first login. The values can be overridden before the first
+installation with `BOOTSTRAP_ADMIN_EMAIL`, `BOOTSTRAP_ADMIN_PASSWORD`, and
+`BOOTSTRAP_COMPANY_NAME` environment variables.
+
 The installer preserves a working Docker installation. If Docker CE and its `containerd.io` package
 already exist, it does not try to install Ubuntu's conflicting `docker.io`/`containerd` packages.
 On a host without Docker it configures Docker's official Ubuntu repository and installs Docker CE
@@ -97,6 +108,7 @@ sudo mozaic-office status
 sudo mozaic-office health
 sudo mozaic-office logs 300
 sudo mozaic-office restart
+sudo mozaic-office bootstrap-admin
 sudo mozaic-office update
 ```
 

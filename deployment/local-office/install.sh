@@ -12,6 +12,10 @@ FRONTEND_REPO="https://github.com/rakibulinux/voice-agent-frontend.git"
 BACKEND_REPO="https://github.com/shayanfh/ai-agent-dashboard.git"
 VOICE_AGENT_REPO="https://github.com/shayanfh/ai-agent-dashboard-voice-agent.git"
 
+BOOTSTRAP_ADMIN_EMAIL=${BOOTSTRAP_ADMIN_EMAIL:-login@starvox.ai}
+BOOTSTRAP_ADMIN_PASSWORD=${BOOTSTRAP_ADMIN_PASSWORD:-admin@mozaic}
+BOOTSTRAP_COMPANY_NAME=${BOOTSTRAP_COMPANY_NAME:-Starvox Office}
+
 log() { printf '[mozaic-office] %s\n' "$*" | tee -a "$LOG_FILE"; }
 die() { log "ERROR: $*"; exit 1; }
 on_error() { log "Installation failed at line $1. Inspect $LOG_FILE."; }
@@ -154,6 +158,9 @@ save_configuration() {
     printf 'LIVEKIT_API_SECRET=%q\n' "$LIVEKIT_API_SECRET"
     printf 'PROVISIONER_API_KEY=%q\n' "$PROVISIONER_API_KEY"
     printf 'AMI_PASSWORD=%q\n' "$AMI_PASSWORD"
+    printf 'BOOTSTRAP_ADMIN_EMAIL=%q\n' "$BOOTSTRAP_ADMIN_EMAIL"
+    printf 'BOOTSTRAP_ADMIN_PASSWORD=%q\n' "$BOOTSTRAP_ADMIN_PASSWORD"
+    printf 'BOOTSTRAP_COMPANY_NAME=%q\n' "$BOOTSTRAP_COMPANY_NAME"
   } > "$STATE_FILE"
   chmod 0600 "$STATE_FILE"
   umask "$previous_umask"
@@ -483,6 +490,17 @@ compose() {
   docker compose --env-file "$RUNTIME_DIR/.env" -f "$RUNTIME_DIR/docker-compose.yml" "$@"
 }
 
+bootstrap_admin() {
+  export BOOTSTRAP_ADMIN_EMAIL BOOTSTRAP_ADMIN_PASSWORD BOOTSTRAP_COMPANY_NAME
+  export BOOTSTRAP_TIMEZONE="$TIMEZONE"
+  compose exec -T \
+    -e BOOTSTRAP_ADMIN_EMAIL \
+    -e BOOTSTRAP_ADMIN_PASSWORD \
+    -e BOOTSTRAP_COMPANY_NAME \
+    -e BOOTSTRAP_TIMEZONE \
+    api python - < "$SCRIPT_DIR/bootstrap_admin.py"
+}
+
 wait_http() {
   local name=$1 url=$2 header=${3:-} attempt
   for attempt in $(seq 1 60); do
@@ -517,6 +535,8 @@ start_stack() {
   wait_http "Dashboard backend" "http://${SERVER_IP}:8000/health" || \
     die "Dashboard backend did not become healthy: http://${SERVER_IP}:8000/health"
   compose run --rm api alembic upgrade head
+  log "Creating the local dashboard administrator"
+  bootstrap_admin
   compose up -d --build celery-worker celery-beat frontend asterisk-provisioner voice-agent
   if ! wait_http "Asterisk provisioner" "http://127.0.0.1:9443/health" \
     "X-Provisioner-API-Key: ${PROVISIONER_API_KEY}"; then
@@ -586,8 +606,10 @@ final_checks() {
   log "Installation completed"
   printf '\nDashboard: http://%s:3000\n' "$SERVER_IP"
   printf 'Backend:   http://%s:8000/docs\n' "$SERVER_IP"
+  printf 'Login:     %s\n' "$BOOTSTRAP_ADMIN_EMAIL"
+  printf 'Password:  %s (change it after the first login)\n' "$BOOTSTRAP_ADMIN_PASSWORD"
   printf 'New Rock:  %s\n' "$INSTALL_ROOT/NEWROCK-HX440G.txt"
-  printf 'Operations: sudo mozaic-office status|health|logs|restart|update\n'
+  printf 'Operations: sudo mozaic-office status|health|logs|restart|bootstrap-admin|update\n'
 }
 
 main() {
