@@ -42,6 +42,11 @@ summary and requires confirmation before installing packages or changing Asteris
 The installer backs up the original Asterisk `pjsip.conf`, `extensions.conf`, and `manager.conf`,
 then adds isolated include files. It does not delete existing Docker volumes or Asterisk data.
 
+The installer preserves a working Docker installation. If Docker CE and its `containerd.io` package
+already exist, it does not try to install Ubuntu's conflicting `docker.io`/`containerd` packages.
+On a host without Docker it configures Docker's official Ubuntu repository and installs Docker CE
+plus the Compose plugin from the same package family.
+
 ## Service layout
 
 | Component | Address |

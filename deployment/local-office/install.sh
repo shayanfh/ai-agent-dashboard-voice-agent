@@ -162,8 +162,36 @@ install_packages() {
   apt-get update
   apt-get install -y --no-install-recommends \
     asterisk asterisk-core-sounds-en-wav \
-    ca-certificates curl git jq openssl python3 ufw \
-    docker.io docker-compose-v2
+    ca-certificates curl git jq openssl python3 ufw
+
+  if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
+    log "Using the existing Docker Engine and Compose plugin"
+  elif dpkg-query -W -f='${Status}' docker.io 2>/dev/null | grep -q 'install ok installed'; then
+    log "Docker Engine is provided by Ubuntu; installing its matching Compose plugin"
+    apt-get install -y docker-compose-v2
+  else
+    log "Installing Docker Engine and Compose from Docker's official Ubuntu repository"
+    install -m 0755 -d /etc/apt/keyrings
+    curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
+      -o /etc/apt/keyrings/docker.asc
+    chmod a+r /etc/apt/keyrings/docker.asc
+    # shellcheck disable=SC1091
+    source /etc/os-release
+    cat > /etc/apt/sources.list.d/docker.sources <<EOF
+Types: deb
+URIs: https://download.docker.com/linux/ubuntu
+Suites: ${UBUNTU_CODENAME:-$VERSION_CODENAME}
+Components: stable
+Architectures: $(dpkg --print-architecture)
+Signed-By: /etc/apt/keyrings/docker.asc
+EOF
+    apt-get update
+    apt-get install -y \
+      docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+  fi
+
+  command -v docker >/dev/null 2>&1 || die "Docker CLI installation failed."
+  docker compose version >/dev/null 2>&1 || die "Docker Compose plugin installation failed."
   systemctl enable --now docker asterisk
 }
 
