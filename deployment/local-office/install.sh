@@ -282,6 +282,7 @@ read=system,call,reporting,cdr,dialplan
 write=system,command,originate
 writetimeout=5000
 EOF
+  chown root:"$ast_group" /etc/asterisk/manager.d/ai-provisioner.conf
   chmod 0640 /etc/asterisk/manager.d/ai-provisioner.conf
   if grep -qE '^[[:space:]]*enabled[[:space:]]*=' /etc/asterisk/manager.conf; then
     sed -Ei '0,/^[[:space:]]*enabled[[:space:]]*=.*/s//enabled = yes/' /etc/asterisk/manager.conf
