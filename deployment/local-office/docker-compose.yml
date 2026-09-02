@@ -1,0 +1,197 @@
+name: mozaic-office
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: mozaic
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ai_agent_dashboard
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mozaic -d ai_agent_dashboard"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis-dashboard:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_dashboard_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis-livekit:
+    image: redis:7-alpine
+    network_mode: host
+    volumes:
+      - redis_livekit_data:/data
+      - ./redis-livekit.conf:/usr/local/etc/redis/redis.conf:ro
+    entrypoint: ["redis-server", "/usr/local/etc/redis/redis.conf"]
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY}
+    ports:
+      - "${SERVER_IP}:9000:9000"
+      - "127.0.0.1:9001:9001"
+    volumes:
+      - minio_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+    entrypoint: /bin/sh
+    command:
+      - -c
+      - |
+        mc alias set local http://minio:9000 "$$MINIO_ACCESS_KEY" "$$MINIO_SECRET_KEY"
+        mc mb --ignore-existing local/ai-agent-dashboard
+    restart: "no"
+
+  api:
+    build: ${BACKEND_DIR}
+    env_file: ./backend.env
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    ports:
+      - "${SERVER_IP}:8000:8000"
+    volumes:
+      - ./provision_livekit.py:/opt/mozaic/provision_livekit.py:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis-dashboard:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  celery-worker:
+    build: ${BACKEND_DIR}
+    env_file: ./backend.env
+    command: celery -A app.workers.celery_app worker --loglevel=info -Q calls,integrations,notifications,knowledge
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis-dashboard:
+        condition: service_healthy
+    restart: unless-stopped
+
+  celery-beat:
+    build: ${BACKEND_DIR}
+    env_file: ./backend.env
+    command: celery -A app.workers.celery_app beat --loglevel=info
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis-dashboard:
+        condition: service_healthy
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ${FRONTEND_DIR}
+      dockerfile: Dockerfile.local-office
+      args:
+        NEXT_PUBLIC_API_URL: http://${SERVER_IP}:8000
+    environment:
+      NEXT_PUBLIC_API_URL: http://${SERVER_IP}:8000
+      VOICE_PREVIEW_API_KEY: ${WEBSITE_API_KEY}
+      HOSTNAME: 0.0.0.0
+      PORT: 3000
+    ports:
+      - "${SERVER_IP}:3000:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  livekit:
+    image: livekit/livekit-server:v1.13.5
+    network_mode: host
+    command: ["--config", "/etc/livekit/livekit.yaml"]
+    volumes:
+      - ./livekit.yaml:/etc/livekit/livekit.yaml:ro
+    depends_on:
+      - redis-livekit
+    restart: unless-stopped
+
+  livekit-sip:
+    image: livekit/sip:latest
+    network_mode: host
+    environment:
+      SIP_CONFIG_FILE: /etc/livekit/sip.yaml
+    volumes:
+      - ./sip.yaml:/etc/livekit/sip.yaml:ro
+    depends_on:
+      - redis-livekit
+      - livekit
+    restart: unless-stopped
+
+  asterisk-provisioner:
+    build: ${VOICE_AGENT_DIR}/deployment/asterisk/provisioner
+    network_mode: host
+    env_file: ./provisioner.env
+    group_add:
+      - "${ASTERISK_GID}"
+    volumes:
+      - /etc/asterisk/ai-agent-generated:/etc/asterisk/ai-agent-generated
+      - /var/lib/asterisk/sounds/ai-agent-generated:/var/lib/asterisk/sounds/ai-agent-generated
+      - provisioner_state:/var/lib/asterisk-provisioner
+    depends_on:
+      api:
+        condition: service_healthy
+      livekit-sip:
+        condition: service_started
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+
+  voice-agent:
+    build: ${VOICE_AGENT_DIR}
+    network_mode: host
+    env_file: ./voice-agent.env
+    depends_on:
+      api:
+        condition: service_healthy
+      livekit:
+        condition: service_started
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_dashboard_data:
+  redis_livekit_data:
+  minio_data:
+  provisioner_state:

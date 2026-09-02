@@ -142,6 +142,9 @@ See `deployment/livekit` for the one central inbound trunk and dispatch rule, an
 `deployment/asterisk` for the Asterisk provisioner. Customer trunks are provisioned through the
 Backend, never during worker startup. The dispatch rule and worker must use the same agent name.
 
+For a single Ubuntu 24.04 office server with native Asterisk, self-hosted LiveKit, and a New Rock
+HX440G/HX4G gateway on the same LAN, use `deployment/local-office`.
+
 ## Asterisk recording
 
 Recording is performed by Asterisk `MixMonitor`, not by the Voice Agent container. This keeps the
