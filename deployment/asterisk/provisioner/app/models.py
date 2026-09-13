@@ -109,6 +109,7 @@ class OutboundCallSpec(BaseModel):
     recipient_id: uuid.UUID
     call_id: uuid.UUID
     keypad_actions: dict[str, str] | None = None
+    report_events: bool = True
 
     @model_validator(mode="after")
     def validate_outbound(self) -> "OutboundCallSpec":

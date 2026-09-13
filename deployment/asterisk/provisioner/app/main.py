@@ -184,10 +184,12 @@ async def originate_outbound_call(
     data: OutboundCallSpec,
     _: None = Depends(authenticate),
 ):
-    outbound_events.register(str(data.attempt_id))
+    if data.report_events:
+        outbound_events.register(str(data.attempt_id))
     try:
         return await service.originate(data)
     except (ValueError, RuntimeError, OSError) as exc:
-        outbound_events.unregister(str(data.attempt_id))
+        if data.report_events:
+            outbound_events.unregister(str(data.attempt_id))
         logger.exception("Outbound originate failed for attempt %s", data.attempt_id)
         raise HTTPException(status_code=502, detail=str(exc)) from exc
