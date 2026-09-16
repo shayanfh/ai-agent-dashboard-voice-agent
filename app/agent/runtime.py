@@ -323,7 +323,7 @@ async def run_inbound_call(ctx: agents.JobContext, settings: Settings) -> None:
             )
         else:
             session = AgentSession(
-                vad=create_vad(),
+                vad=ctx.proc.userdata.get("vad") or create_vad(),
                 stt=create_stt(config, settings),
                 llm=create_llm(config, settings),
                 tts=create_tts(config, settings),
@@ -379,9 +379,10 @@ async def run_inbound_call(ctx: agents.JobContext, settings: Settings) -> None:
             greeting = config.greeting_message or (
                 f"Hello, you are speaking with {config.agent_name}."
             )
-            await session.generate_reply(
-                instructions=f"Say this greeting once, naturally, in {config.language}: {greeting}"
-            )
+            # The greeting is already approved text. Sending it through the LLM
+            # adds a full model round-trip before TTS and can leave inbound
+            # callers in silence for another second or two.
+            await session.say(greeting, allow_interruptions=False)
         log.info("call_session_started")
         reason = "caller_disconnected"
         max_duration_seconds = (

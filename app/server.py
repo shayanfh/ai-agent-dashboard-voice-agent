@@ -5,11 +5,19 @@ from livekit.agents import AgentServer
 from app.agent.runtime import run_inbound_call
 from app.core.config import get_settings
 from app.core.logging import configure_logging
+from app.providers.factories import create_vad
 
 settings = get_settings()
 configure_logging(settings.log_level)
 logger = structlog.get_logger()
 server = AgentServer()
+
+
+def prewarm(proc: agents.JobProcess) -> None:
+    proc.userdata["vad"] = create_vad()
+
+
+server.setup_fnc = prewarm
 
 
 @server.rtc_session(agent_name=settings.livekit_agent_name)
@@ -18,4 +26,3 @@ async def inbound_agent(ctx: agents.JobContext) -> None:
         await run_inbound_call(ctx, settings)
     except Exception:
         logger.exception("inbound_call_failed", room_name=ctx.room.name)
-
