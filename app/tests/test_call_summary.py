@@ -65,6 +65,10 @@ async def test_openai_analyzer_returns_structured_outcome_and_data(
         assert payload["text"]["verbosity"] == "low"
         assert payload["text"]["format"]["type"] == "json_schema"
         assert payload["text"]["format"]["strict"] is True
+        assert "Be permissive when identifying a completed booking" in payload["instructions"]
+        assert "especially Arabic, Persian, and English" in payload["instructions"]
+        assert "إن شاء الله" in payload["instructions"]
+        assert "explicitly cancels" in payload["instructions"]
         assert "table for four" in payload["input"]
         analysis = {
             "summary": "The caller confirmed a table reservation for four.",
